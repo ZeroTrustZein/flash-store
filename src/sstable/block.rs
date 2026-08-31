@@ -36,7 +36,10 @@ impl Block {
         }
 
         let len = data.len();
-        let num_offsets = u32::from_le_bytes(data[len - 4..len].try_into().unwrap()) as usize;
+        let num_offsets_bytes: [u8; 4] = data[len - 4..len]
+            .try_into()
+            .map_err(|_| crate::error::FlashStoreError::Corruption("corrupted offsets length".into()))?;
+        let num_offsets = u32::from_le_bytes(num_offsets_bytes) as usize;
         let total_offsets_bytes = num_offsets.checked_mul(4).ok_or_else(|| {
             crate::error::FlashStoreError::Corruption("corrupted offsets count".into())
         })?;

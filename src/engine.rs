@@ -73,10 +73,12 @@ impl FlashStore {
                         if record.seq_no > max_seq {
                             max_seq = record.seq_no;
                         }
-                        if record.is_delete {
-                            initial_memtable.delete(record.key, record.seq_no);
-                        } else {
-                            initial_memtable.put(record.key, record.value, record.seq_no);
+                        if record.seq_no > version_set.last_sequence() {
+                            if record.is_delete {
+                                initial_memtable.delete(record.key, record.seq_no);
+                            } else {
+                                initial_memtable.put(record.key, record.value, record.seq_no);
+                            }
                         }
                     }
                 }
@@ -277,6 +279,7 @@ impl FlashStore {
         let mut iter = old_mem.iter();
         let mut smallest_key = None;
         let mut largest_key = None;
+        let mut max_flushed_seq = 0;
         let mut count = 0;
 
         while iter.valid() {
@@ -285,6 +288,9 @@ impl FlashStore {
                     smallest_key = Some(entry.key.clone());
                 }
                 largest_key = Some(entry.key.clone());
+                if entry.seq_no > max_flushed_seq {
+                    max_flushed_seq = entry.seq_no;
+                }
                 builder.add(entry.clone())?;
                 count += 1;
             }
@@ -303,20 +309,61 @@ impl FlashStore {
 
                 let mut edit = crate::manifest::version::VersionEdit::new();
                 edit.add_file(0, meta);
-                edit.last_sequence = Some(self.inner.version_set.last_sequence());
+                if max_flushed_seq > 0 {
+                    edit.last_sequence = Some(max_flushed_seq);
+                }
                 edit.next_file_number = Some(file_num + 1);
                 self.inner.manifest.log_edit(&edit)?;
                 self.inner.version_set.log_and_apply(edit);
             }
         }
 
-        // Reset WAL only after SSTable + manifest are durably written
-        self.inner.wal.write().reset()?;
+        // Safely update WAL and immutable memtables:
+        // Re-write WAL with any remaining unflushed entries (from other imm_memtables or active memtable)
+        {
+            let wal_writer = self.inner.wal.write();
+            let mut imm_guard = self.inner.imm_memtables.write();
+            imm_guard.retain(|m| m.id() != old_mem.id());
 
-        self.inner
-            .imm_memtables
-            .write()
-            .retain(|m| m.id() != old_mem.id());
+            // Collect all remaining unflushed entries in sequence
+            let mut remaining_records = Vec::new();
+            for imm in imm_guard.iter() {
+                let mut iter = imm.iter();
+                while iter.valid() {
+                    if let Some(entry) = iter.item() {
+                        remaining_records.push(WalRecord {
+                            key: entry.key.clone(),
+                            value: entry.value.clone(),
+                            is_delete: entry.value_type == ValueType::Tombstone,
+                            seq_no: entry.seq_no,
+                        });
+                    }
+                    iter.next();
+                }
+            }
+
+            {
+                let active = self.inner.memtable.read();
+                let mut iter = active.iter();
+                while iter.valid() {
+                    if let Some(entry) = iter.item() {
+                        remaining_records.push(WalRecord {
+                            key: entry.key.clone(),
+                            value: entry.value.clone(),
+                            is_delete: entry.value_type == ValueType::Tombstone,
+                            seq_no: entry.seq_no,
+                        });
+                    }
+                    iter.next();
+                }
+            }
+
+            wal_writer.reset()?;
+            if !remaining_records.is_empty() {
+                remaining_records.sort_by_key(|r| r.seq_no);
+                wal_writer.append_batch(&remaining_records)?;
+            }
+        }
 
         Ok(())
     }

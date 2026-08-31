@@ -50,7 +50,11 @@ impl Manifest {
         let mut edits = Vec::new();
         let mut offset = 0;
         while offset + 4 <= buffer.len() {
-            let len = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap()) as usize;
+            let len_bytes: [u8; 4] = match buffer[offset..offset + 4].try_into() {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+            let len = u32::from_le_bytes(len_bytes) as usize;
             offset += 4;
             if offset + len > buffer.len() {
                 break;
@@ -140,6 +144,9 @@ impl VersionSet {
                         .store(meta.file_number + 1, Ordering::SeqCst);
                 }
                 current_levels[level].push(meta);
+                if level > 0 {
+                    current_levels[level].sort_by(|a, b| a.smallest_key.cmp(&b.smallest_key));
+                }
             }
         }
 
