@@ -38,6 +38,31 @@ impl WalWriter {
         Ok(())
     }
 
+    pub fn append_batch(&self, records: &[WalRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let mut file = self.file.lock();
+        for record in records {
+            let encoded = record.encode();
+            file.write_all(&encoded)?;
+        }
+        if self.sync {
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+
+    pub fn reset(&self) -> Result<()> {
+        let mut file = self.file.lock();
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        if self.sync {
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+
     pub fn sync(&self) -> Result<()> {
         let file = self.file.lock();
         file.sync_all()?;

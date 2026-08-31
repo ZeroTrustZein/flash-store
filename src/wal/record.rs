@@ -54,3 +54,60 @@ impl WalRecord {
         Ok(record)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wal_record_encode_decode() {
+        let record = WalRecord {
+            key: Bytes::from_static(b"test_key"),
+            value: Bytes::from_static(b"test_val"),
+            is_delete: false,
+            seq_no: 42,
+        };
+
+        let encoded = record.encode();
+        let decoded = WalRecord::decode(encoded).expect("decode WAL record");
+        assert_eq!(decoded.key, record.key);
+        assert_eq!(decoded.value, record.value);
+        assert_eq!(decoded.is_delete, record.is_delete);
+        assert_eq!(decoded.seq_no, record.seq_no);
+    }
+
+    #[test]
+    fn test_wal_record_tombstone() {
+        let record = WalRecord {
+            key: Bytes::from_static(b"del_key"),
+            value: Bytes::new(),
+            is_delete: true,
+            seq_no: 99,
+        };
+
+        let encoded = record.encode();
+        let decoded = WalRecord::decode(encoded).expect("decode tombstone");
+        assert_eq!(decoded.key, record.key);
+        assert!(decoded.value.is_empty());
+        assert!(decoded.is_delete);
+        assert_eq!(decoded.seq_no, 99);
+    }
+
+    #[test]
+    fn test_wal_record_corrupted_checksum() {
+        let record = WalRecord {
+            key: Bytes::from_static(b"key"),
+            value: Bytes::from_static(b"val"),
+            is_delete: false,
+            seq_no: 1,
+        };
+
+        let mut encoded = record.encode().to_vec();
+        // Flip a byte in the payload
+        let last_idx = encoded.len() - 1;
+        encoded[last_idx] ^= 0xFF;
+
+        let result = WalRecord::decode(Bytes::from(encoded));
+        assert!(result.is_err());
+    }
+}

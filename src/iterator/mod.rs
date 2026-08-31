@@ -137,15 +137,13 @@ impl<I: StorageIterator> MergingIterator<I> {
             }
 
             // Deduplicate matching keys from other iterators
-            while let Some(mut next_top) = self.heap.peek_mut() {
-                if next_top.iter.key() == &key {
-                    next_top.iter.next()?;
-                    if !next_top.iter.valid() {
-                        parking_lot::lock_api::MutexGuard::leak(
-                            // pop empty
-                            std::mem::forget(next_top),
-                        );
-                        self.heap.pop();
+            while let Some(peek) = self.heap.peek() {
+                if peek.iter.key() == &key {
+                    // pop matching iterator, advance, reinsert if still valid
+                    let mut node = self.heap.pop().unwrap();
+                    node.iter.next()?;
+                    if node.iter.valid() {
+                        self.heap.push(node);
                     }
                 } else {
                     break;

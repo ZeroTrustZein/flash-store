@@ -15,14 +15,23 @@ impl SkipList {
         }
     }
 
-    pub fn insert(&self, entry: Entry) {
+    pub fn insert(&self, entry: Entry) -> Option<usize> {
         let mut map = self.map.write();
-        map.insert(entry.key.clone(), entry);
+        let old = map.insert(entry.key.clone(), entry);
+        old.map(|e| e.estimated_size())
     }
 
     pub fn get(&self, key: &Key) -> Option<Entry> {
         let map = self.map.read();
         map.get(key).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.map.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.read().is_empty()
     }
 
     pub fn iter(&self) -> SkipListIter {

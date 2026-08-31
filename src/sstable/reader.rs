@@ -54,6 +54,10 @@ impl TableReader {
     }
 
     pub fn get(&mut self, key: &Key) -> Result<Option<Option<Bytes>>> {
+        if self.block_offsets.is_empty() {
+            return Ok(None);
+        }
+
         if !BloomFilter::may_contain(&self.bloom_filter, key) {
             return Ok(None);
         }

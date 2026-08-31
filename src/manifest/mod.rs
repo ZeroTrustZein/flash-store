@@ -92,6 +92,14 @@ impl VersionSet {
         self.next_file_number.fetch_add(1, Ordering::SeqCst)
     }
 
+    pub fn set_next_file_number(&self, file_number: u64) {
+        self.next_file_number.store(file_number, Ordering::SeqCst);
+    }
+
+    pub fn next_sequence(&self) -> u64 {
+        self.last_sequence.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
     pub fn last_sequence(&self) -> u64 {
         self.last_sequence.load(Ordering::SeqCst)
     }
@@ -111,15 +119,25 @@ impl VersionSet {
 
         for (level, meta) in edit.new_files {
             if level < current_levels.len() {
+                let current_next = self.next_file_number.load(Ordering::SeqCst);
+                if meta.file_number >= current_next {
+                    self.next_file_number.store(meta.file_number + 1, Ordering::SeqCst);
+                }
                 current_levels[level].push(meta);
             }
         }
 
         if let Some(next) = edit.next_file_number {
-            self.next_file_number.store(next, Ordering::SeqCst);
+            let current_next = self.next_file_number.load(Ordering::SeqCst);
+            if next > current_next {
+                self.next_file_number.store(next, Ordering::SeqCst);
+            }
         }
         if let Some(last_seq) = edit.last_sequence {
-            self.last_sequence.store(last_seq, Ordering::SeqCst);
+            let current_last = self.last_sequence.load(Ordering::SeqCst);
+            if last_seq > current_last {
+                self.last_sequence.store(last_seq, Ordering::SeqCst);
+            }
         }
 
         *self.current.write() = Arc::new(Version {
