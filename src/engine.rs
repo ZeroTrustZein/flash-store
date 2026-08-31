@@ -370,13 +370,16 @@ impl FlashStore {
         let mut merged: BTreeMap<Key, (u64, ValueType, Value)> = BTreeMap::new();
 
         let mut update_entry = |entry: Entry| {
-            if let Some((existing_seq, _, _)) = merged.get(&entry.key) {
-                if entry.seq_no > *existing_seq {
-                    merged.insert(entry.key, (entry.seq_no, entry.value_type, entry.value));
-                }
-            } else {
-                merged.insert(entry.key, (entry.seq_no, entry.value_type, entry.value));
-            }
+            merged
+                .entry(entry.key)
+                .and_modify(|(seq, vt, val)| {
+                    if entry.seq_no > *seq {
+                        *seq = entry.seq_no;
+                        *vt = entry.value_type;
+                        *val = entry.value.clone();
+                    }
+                })
+                .or_insert_with(|| (entry.seq_no, entry.value_type, entry.value));
         };
 
         // 1. Read SSTables

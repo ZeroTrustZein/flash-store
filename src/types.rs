@@ -179,6 +179,7 @@ pub struct Entry {
 
 impl Entry {
     /// Create a new generic entry.
+    #[inline]
     pub fn new(
         key: impl IntoBytes,
         value: impl IntoBytes,
@@ -194,6 +195,7 @@ impl Entry {
     }
 
     /// Create a new value entry.
+    #[inline]
     pub fn new_value(
         key: impl IntoBytes,
         value: impl IntoBytes,
@@ -203,6 +205,7 @@ impl Entry {
     }
 
     /// Create a new tombstone (deletion) entry with empty value payload.
+    #[inline]
     pub fn new_tombstone(key: impl IntoBytes, seq_no: SequenceNumber) -> Self {
         Self::new(key, Bytes::new(), ValueType::Tombstone, seq_no)
     }
@@ -262,6 +265,7 @@ pub struct InternalKey {
 
 impl InternalKey {
     /// Create a new InternalKey.
+    #[inline]
     pub fn new(
         user_key: impl IntoBytes,
         seq_no: SequenceNumber,
@@ -275,6 +279,7 @@ impl InternalKey {
     }
 
     /// Encode internal key to binary bytes: `[user_key][seq_no (8 bytes BE)][value_type (1 byte)]`.
+    #[inline]
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(self.user_key.len() + 8 + 1);
         buf.put_slice(&self.user_key);
@@ -308,12 +313,14 @@ impl InternalKey {
 }
 
 impl PartialOrd for InternalKey {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for InternalKey {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // LSM order:
         // 1. user_key ascending

@@ -13,6 +13,7 @@ pub struct Footer {
 }
 
 impl Footer {
+    #[inline]
     pub fn new(
         meta_index_offset: u64,
         meta_index_size: u64,
@@ -28,6 +29,7 @@ impl Footer {
         }
     }
 
+    #[inline]
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(FOOTER_SIZE);
         buf.put_u64_le(self.meta_index_offset);
@@ -39,6 +41,7 @@ impl Footer {
         buf.freeze()
     }
 
+    #[inline]
     pub fn decode(mut data: Bytes) -> crate::error::Result<Self> {
         if data.len() < FOOTER_SIZE {
             return Err(crate::error::FlashStoreError::Corruption(

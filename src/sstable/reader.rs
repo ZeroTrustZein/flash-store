@@ -67,6 +67,7 @@ impl TableReader {
         })
     }
 
+    #[inline]
     pub fn file_number(&self) -> u64 {
         self.file_number
     }

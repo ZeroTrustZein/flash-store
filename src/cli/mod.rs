@@ -203,8 +203,8 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         Cmd::Scan { start, end, limit, reverse, format } => {
             let db = open_db(opts)?;
             let fmt = if opts.json { OutputFormat::Json } else { format };
-            let start_key = start.map(|s| Bytes::from(s));
-            let end_key = end.map(|s| Bytes::from(s));
+            let start_key = start.map(Bytes::from);
+            let end_key = end.map(Bytes::from);
             let mut results = db.scan(start_key, end_key)?;
             if reverse {
                 results.reverse();
@@ -219,15 +219,13 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
             let batch = if let Some(ops_json) = ops {
                 batch_parser::parse_json_ops(&ops_json)?
             } else if let Some(path) = file {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| crate::error::FlashStoreError::Io(e))?;
+                let content = std::fs::read_to_string(&path)?;
                 batch_parser::parse_json_ops(&content)?
             } else {
                 // Read from stdin
                 use std::io::Read;
                 let mut buf = String::new();
-                std::io::stdin().read_to_string(&mut buf)
-                    .map_err(|e| crate::error::FlashStoreError::Io(e))?;
+                std::io::stdin().read_to_string(&mut buf)?;
                 batch_parser::parse_json_ops(&buf)?
             };
             let count = batch.len();

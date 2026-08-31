@@ -1,7 +1,7 @@
 pub mod version;
 
 use crate::error::Result;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use version::{Version, VersionEdit};
 
 pub struct Manifest {
-    file: Arc<parking_lot::Mutex<File>>,
+    file: Mutex<File>,
     path: PathBuf,
 }
 
@@ -22,11 +22,12 @@ impl Manifest {
             .append(true)
             .open(&path)?;
         Ok(Self {
-            file: Arc::new(parking_lot::Mutex::new(file)),
+            file: Mutex::new(file),
             path: path.as_ref().to_path_buf(),
         })
     }
 
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -52,10 +53,7 @@ impl Manifest {
 
         let mut edits = Vec::new();
         let mut offset = 0;
-        while offset < buffer.len() {
-            if offset + 4 > buffer.len() {
-                break;
-            }
+        while offset + 4 <= buffer.len() {
             let len = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
             if offset + len > buffer.len() {
@@ -94,30 +92,37 @@ impl VersionSet {
         }
     }
 
+    #[inline]
     pub fn current(&self) -> Arc<Version> {
         self.current.read().clone()
     }
 
+    #[inline]
     pub fn max_levels(&self) -> usize {
         self.max_levels
     }
 
+    #[inline]
     pub fn next_file_number(&self) -> u64 {
         self.next_file_number.fetch_add(1, Ordering::SeqCst)
     }
 
+    #[inline]
     pub fn set_next_file_number(&self, file_number: u64) {
         self.next_file_number.store(file_number, Ordering::SeqCst);
     }
 
+    #[inline]
     pub fn next_sequence(&self) -> u64 {
         self.last_sequence.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    #[inline]
     pub fn last_sequence(&self) -> u64 {
         self.last_sequence.load(Ordering::SeqCst)
     }
 
+    #[inline]
     pub fn set_last_sequence(&self, seq: u64) {
         self.last_sequence.store(seq, Ordering::SeqCst);
     }

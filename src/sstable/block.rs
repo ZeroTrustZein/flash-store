@@ -60,6 +60,7 @@ impl Block {
         })
     }
 
+    #[inline]
     pub fn get_entry(&self, index: usize) -> Option<Entry> {
         if index >= self.offsets.len() {
             return None;
@@ -78,6 +79,7 @@ impl Block {
         bincode::deserialize(entry_bytes).ok()
     }
 
+    #[inline]
     pub fn entries_len(&self) -> usize {
         self.offsets.len()
     }

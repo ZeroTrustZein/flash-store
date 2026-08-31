@@ -22,19 +22,23 @@ impl MemtableIterator {
 }
 
 impl StorageIterator for MemtableIterator {
+    #[inline]
     fn valid(&self) -> bool {
         self.iter.valid()
     }
 
+    #[inline]
     fn next(&mut self) -> Result<()> {
         self.iter.next();
         Ok(())
     }
 
+    #[inline]
     fn key(&self) -> &Key {
         &self.iter.item().expect("iterator not valid").key
     }
 
+    #[inline]
     fn value(&self) -> &Value {
         &self.iter.item().expect("iterator not valid").value
     }
@@ -52,10 +56,12 @@ impl SSTableIterator {
 }
 
 impl StorageIterator for SSTableIterator {
+    #[inline]
     fn valid(&self) -> bool {
         self.index < self.entries.len()
     }
 
+    #[inline]
     fn next(&mut self) -> Result<()> {
         if self.valid() {
             self.index += 1;
@@ -63,10 +69,12 @@ impl StorageIterator for SSTableIterator {
         Ok(())
     }
 
+    #[inline]
     fn key(&self) -> &Key {
         &self.entries[self.index].key
     }
 
+    #[inline]
     fn value(&self) -> &Value {
         &self.entries[self.index].value
     }
@@ -156,18 +164,22 @@ impl<I: StorageIterator> MergingIterator<I> {
 }
 
 impl<I: StorageIterator> StorageIterator for MergingIterator<I> {
+    #[inline]
     fn valid(&self) -> bool {
         self.current.is_some()
     }
 
+    #[inline]
     fn next(&mut self) -> Result<()> {
         self.advance()
     }
 
+    #[inline]
     fn key(&self) -> &Key {
         &self.current.as_ref().expect("iterator not valid").0
     }
 
+    #[inline]
     fn value(&self) -> &Value {
         &self.current.as_ref().expect("iterator not valid").1
     }

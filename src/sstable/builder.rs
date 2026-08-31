@@ -13,6 +13,7 @@ pub struct TableBuilder {
     file: File,
     options: Options,
     current_entries: Vec<Entry>,
+    current_block_size: usize,
     block_offsets: Vec<u64>,
     first_keys: Vec<Bytes>,
     all_keys: Vec<Bytes>,
@@ -26,6 +27,7 @@ impl TableBuilder {
             file,
             options,
             current_entries: Vec::new(),
+            current_block_size: 0,
             block_offsets: Vec::new(),
             first_keys: Vec::new(),
             all_keys: Vec::new(),
@@ -38,10 +40,10 @@ impl TableBuilder {
             self.first_keys.push(entry.key.clone());
         }
         self.all_keys.push(entry.key.clone());
+        self.current_block_size += entry.estimated_size();
         self.current_entries.push(entry);
 
-        let estimated_size: usize = self.current_entries.iter().map(|e| e.estimated_size()).sum();
-        if estimated_size >= self.options.block_size {
+        if self.current_block_size >= self.options.block_size {
             self.flush_block()?;
         }
         Ok(())
@@ -57,6 +59,7 @@ impl TableBuilder {
         self.block_offsets.push(self.offset);
         self.offset += encoded.len() as u64;
         self.current_entries.clear();
+        self.current_block_size = 0;
         Ok(())
     }
 

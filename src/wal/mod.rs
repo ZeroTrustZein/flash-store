@@ -6,10 +6,9 @@ use record::WalRecord;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 pub struct WalWriter {
-    file: Arc<Mutex<File>>,
+    file: Mutex<File>,
     path: PathBuf,
     sync: bool,
 }
@@ -23,16 +22,16 @@ impl WalWriter {
             .open(&path)?;
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
-            file: Arc::new(Mutex::new(file)),
+            file: Mutex::new(file),
             path: path.as_ref().to_path_buf(),
             sync,
         })
     }
 
+    #[inline]
     pub fn append(&self, record: &WalRecord) -> Result<()> {
         let encoded = record.encode();
         let mut file = self.file.lock();
-        file.seek(SeekFrom::End(0))?;
         file.write_all(&encoded)?;
         if self.sync {
             file.sync_all()?;
@@ -45,7 +44,6 @@ impl WalWriter {
             return Ok(());
         }
         let mut file = self.file.lock();
-        file.seek(SeekFrom::End(0))?;
         for record in records {
             let encoded = record.encode();
             file.write_all(&encoded)?;
@@ -66,12 +64,14 @@ impl WalWriter {
         Ok(())
     }
 
+    #[inline]
     pub fn sync(&self) -> Result<()> {
         let file = self.file.lock();
         file.sync_all()?;
         Ok(())
     }
 
+    #[inline]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -94,16 +94,15 @@ impl WalReader {
         self.file.read_to_end(&mut buffer)?;
 
         let mut offset = 0;
-        while offset < buffer.len() {
-            if offset + 8 > buffer.len() {
-                // Incomplete header at end of WAL (e.g. power loss during write)
-                break;
-            }
-            let len_bytes = &buffer[offset + 4..offset + 8];
-            let payload_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
+        while offset + 8 <= buffer.len() {
+            let len_bytes: [u8; 4] = match buffer[offset + 4..offset + 8].try_into() {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+            let payload_len = u32::from_le_bytes(len_bytes) as usize;
             let record_len = 8 + payload_len;
             if offset + record_len > buffer.len() {
-                // Incomplete payload at end of WAL
+                // Incomplete payload at end of WAL (torn write)
                 break;
             }
 

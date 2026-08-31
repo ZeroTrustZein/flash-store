@@ -107,8 +107,8 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
             Ok(Some(format!("OK ({:?})", elapsed)))
         }
         "SCAN" => {
-            let start = args.get(0).map(|s| Bytes::from(s.clone()));
-            let end = args.get(1).map(|s| Bytes::from(s.clone()));
+            let start = args.first().cloned().map(Bytes::from);
+            let end = args.get(1).cloned().map(Bytes::from);
             let limit = args.get(2).and_then(|s| s.parse::<usize>().ok());
 
             let mut results = db.scan(start, end)?;

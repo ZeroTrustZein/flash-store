@@ -22,6 +22,7 @@ pub struct Compactor {
 }
 
 impl Compactor {
+    #[inline]
     pub fn new(max_levels: usize, base_level_size_bytes: usize) -> Self {
         Self {
             max_levels,
@@ -30,12 +31,14 @@ impl Compactor {
         }
     }
 
+    #[inline]
     pub fn with_l0_trigger(mut self, trigger: usize) -> Self {
         self.l0_compaction_trigger = trigger;
         self
     }
 
     /// Check if two key ranges [min1, max1] and [min2, max2] overlap.
+    #[inline]
     pub fn ranges_overlap(
         min1: &Bytes,
         max1: &Bytes,

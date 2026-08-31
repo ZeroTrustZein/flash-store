@@ -1,5 +1,7 @@
 use bytes::Bytes;
+use std::f64::consts::LN_2;
 
+/// A Bloom filter implementation for fast probabilistic membership checks in SSTables.
 #[derive(Clone, Debug)]
 pub struct BloomFilter {
     bits_per_key: usize,
@@ -7,8 +9,13 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
+    /// Create a new Bloom filter generator configured with `bits_per_key`.
+    ///
+    /// The number of hash functions `k` is derived from `bits_per_key * ln(2)`,
+    /// clamped to the range `[1, 30]`.
+    #[inline]
     pub fn new(bits_per_key: usize) -> Self {
-        let k = ((bits_per_key as f64) * 0.69314718056).round() as u32; // ln(2)
+        let k = ((bits_per_key as f64) * LN_2).round() as u32;
         let k = k.clamp(1, 30);
         Self {
             bits_per_key,
@@ -16,6 +23,10 @@ impl BloomFilter {
         }
     }
 
+    /// Builds a serialized Bloom filter bitmap from a slice of keys.
+    ///
+    /// Returns an empty `Bytes` if `keys` is empty. The last byte of the returned buffer
+    /// encodes the number of hash functions `k`.
     pub fn build_from_keys(&self, keys: &[Bytes]) -> Bytes {
         if keys.is_empty() {
             return Bytes::new();
@@ -44,6 +55,10 @@ impl BloomFilter {
         Bytes::from(filter)
     }
 
+    /// Checks whether the filter may contain the specified `key`.
+    ///
+    /// Returns `true` if the key may be present (or if the filter is too small/empty),
+    /// or `false` if the key is definitely not present in the set.
     pub fn may_contain(filter_bytes: &Bytes, key: &[u8]) -> bool {
         if filter_bytes.len() <= 1 {
             return true;

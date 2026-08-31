@@ -172,32 +172,39 @@ impl LruBlockCache {
         }
     }
 
+    #[inline]
     pub fn contains_key(&self, key: &(u64, u64)) -> bool {
         self.inner.lock().map.contains_key(key)
     }
 }
 
 impl BlockCache for LruBlockCache {
+    #[inline]
     fn get(&self, key: &(u64, u64)) -> Option<Bytes> {
         self.inner.lock().get(key)
     }
 
+    #[inline]
     fn insert(&self, key: (u64, u64), value: Bytes) {
         self.inner.lock().insert(key, value);
     }
 
+    #[inline]
     fn remove(&self, key: &(u64, u64)) -> Option<Bytes> {
         self.inner.lock().remove(key)
     }
 
+    #[inline]
     fn clear(&self) {
         self.inner.lock().clear();
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.inner.lock().map.len()
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
         self.inner.lock().map.is_empty()
     }
