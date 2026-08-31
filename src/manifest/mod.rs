@@ -61,10 +61,16 @@ impl Manifest {
             if offset + len > buffer.len() {
                 break;
             }
-            let edit: VersionEdit = bincode::deserialize(&buffer[offset..offset + len])
-                .map_err(|e| crate::error::FlashStoreError::Other(e.to_string()))?;
-            edits.push(edit);
-            offset += len;
+            match bincode::deserialize::<VersionEdit>(&buffer[offset..offset + len]) {
+                Ok(edit) => {
+                    edits.push(edit);
+                    offset += len;
+                }
+                Err(_) => {
+                    // Stop gracefully at corrupted trailing record
+                    break;
+                }
+            }
         }
 
         Ok(edits)

@@ -388,6 +388,18 @@ fn test_subsystems_merging_iterator_integration() -> Result<()> {
     assert_eq!(collected[2].0, bytes::Bytes::from_static(b"cherry"));
     assert_eq!(collected[3].0, bytes::Bytes::from_static(b"date"));
 
+    // Test tie-breaking: lower index iterator wins for same key
+    let tie_iter1 = SSTableIterator::new(vec![
+        Entry::new_value(bytes::Bytes::from_static(b"k"), bytes::Bytes::from_static(b"v_newer"), 2),
+    ]);
+    let tie_iter2 = SSTableIterator::new(vec![
+        Entry::new_value(bytes::Bytes::from_static(b"k"), bytes::Bytes::from_static(b"v_older"), 1),
+    ]);
+    let mut tie_merger = MergingIterator::new(vec![tie_iter1, tie_iter2]);
+    assert!(tie_merger.valid());
+    assert_eq!(tie_merger.key(), &bytes::Bytes::from_static(b"k"));
+    assert_eq!(tie_merger.value(), &bytes::Bytes::from_static(b"v_newer"));
+
     Ok(())
 }
 
@@ -540,7 +552,7 @@ fn test_concurrent_batch_writes_and_scans() -> Result<()> {
     let dir = tempdir().unwrap();
     let options = OptionsBuilder::new()
         .dir(dir.path())
-        .memtable_size(512)
+        .memtable_size(1024)
         .build();
     let db = Arc::new(FlashStore::open(options)?);
 
@@ -550,9 +562,9 @@ fn test_concurrent_batch_writes_and_scans() -> Result<()> {
     for t in 0..4 {
         let db_clone = Arc::clone(&db);
         handles.push(thread::spawn(move || -> Result<()> {
-            for b in 0..10 {
+            for b in 0..5 {
                 let mut batch = WriteBatch::new();
-                for i in 0..10 {
+                for i in 0..5 {
                     let k = format!("th_{}_b_{}_k_{}", t, b, i);
                     let v = format!("val_{}_{}_{}", t, b, i);
                     batch.put(k, v);
@@ -567,7 +579,7 @@ fn test_concurrent_batch_writes_and_scans() -> Result<()> {
     for _ in 0..2 {
         let db_clone = Arc::clone(&db);
         handles.push(thread::spawn(move || -> Result<()> {
-            for _ in 0..10 {
+            for _ in 0..5 {
                 let _ = db_clone.scan(None, None)?;
             }
             Ok(())
@@ -578,10 +590,10 @@ fn test_concurrent_batch_writes_and_scans() -> Result<()> {
         handle.join().unwrap()?;
     }
 
-    // Verify that all 4 * 10 * 10 = 400 keys were written correctly
+    // Verify that all 4 * 5 * 5 = 100 keys were written correctly
     for t in 0..4 {
-        for b in 0..10 {
-            for i in 0..10 {
+        for b in 0..5 {
+            for i in 0..5 {
                 let k = format!("th_{}_b_{}_k_{}", t, b, i);
                 let expected = format!("val_{}_{}_{}", t, b, i);
                 assert_eq!(

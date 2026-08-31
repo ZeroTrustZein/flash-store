@@ -93,12 +93,12 @@ impl<I: StorageIterator> PartialOrd for HeapNode<I> {
 
 impl<I: StorageIterator> Ord for HeapNode<I> {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Reverse for min-heap
+        // Reverse for min-heap; lower index = newer data, wins ties
         other
             .iter
             .key()
             .cmp(self.iter.key())
-            .then_with(|| other.index.cmp(&self.index))
+            .then_with(|| self.index.cmp(&other.index))
     }
 }
 

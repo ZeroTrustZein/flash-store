@@ -32,6 +32,8 @@ struct EngineInner {
     version_set: VersionSet,
     block_cache: Arc<dyn BlockCache>,
     memtable_id_seq: AtomicUsize,
+    flush_lock: parking_lot::Mutex<()>,
+    compact_lock: parking_lot::Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -95,6 +97,8 @@ impl FlashStore {
             version_set,
             block_cache,
             memtable_id_seq: AtomicUsize::new(1),
+            flush_lock: parking_lot::Mutex::new(()),
+            compact_lock: parking_lot::Mutex::new(()),
         });
 
         Ok(Self { inner })
@@ -238,11 +242,13 @@ impl FlashStore {
 
         self.inner.wal.read().append_batch(&records)?;
 
-        let memtable = self.inner.memtable.read();
-        for (k, v_opt, seq) in ops {
-            match v_opt {
-                Some(v) => memtable.put(k, v, seq),
-                None => memtable.delete(k, seq),
+        {
+            let memtable = self.inner.memtable.read();
+            for (k, v_opt, seq) in ops {
+                match v_opt {
+                    Some(v) => memtable.put(k, v, seq),
+                    None => memtable.delete(k, seq),
+                }
             }
         }
 
@@ -251,6 +257,7 @@ impl FlashStore {
     }
 
     pub fn flush(&self) -> Result<()> {
+        let _guard = self.inner.flush_lock.lock();
         let old_mem = {
             let mut mem_guard = self.inner.memtable.write();
             if mem_guard.approximate_size() == 0 && mem_guard.is_empty() {
@@ -262,9 +269,6 @@ impl FlashStore {
             self.inner.imm_memtables.write().push(old.clone());
             old
         };
-
-        // Reset WAL for new active memtable
-        self.inner.wal.write().reset()?;
 
         let file_num = self.inner.version_set.next_file_number();
         let sst_path = self
@@ -304,11 +308,14 @@ impl FlashStore {
                 let mut edit = crate::manifest::version::VersionEdit::new();
                 edit.add_file(0, meta);
                 edit.last_sequence = Some(self.inner.version_set.last_sequence());
-                edit.next_file_number = Some(self.inner.version_set.next_file_number());
+                edit.next_file_number = Some(file_num + 1);
                 self.inner.manifest.log_edit(&edit)?;
                 self.inner.version_set.log_and_apply(edit);
             }
         }
+
+        // Reset WAL only after SSTable + manifest are durably written
+        self.inner.wal.write().reset()?;
 
         self.inner
             .imm_memtables
@@ -319,6 +326,7 @@ impl FlashStore {
     }
 
     pub fn compact(&self) -> Result<()> {
+        let _guard = self.inner.compact_lock.lock();
         let compactor = Compactor::new(
             self.inner.options.max_levels,
             self.inner.options.base_level_size_bytes,

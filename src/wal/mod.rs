@@ -96,19 +96,29 @@ impl WalReader {
         let mut offset = 0;
         while offset < buffer.len() {
             if offset + 8 > buffer.len() {
+                // Incomplete header at end of WAL (e.g. power loss during write)
                 break;
             }
             let len_bytes = &buffer[offset + 4..offset + 8];
             let payload_len = u32::from_le_bytes(len_bytes.try_into().unwrap()) as usize;
             let record_len = 8 + payload_len;
             if offset + record_len > buffer.len() {
+                // Incomplete payload at end of WAL
                 break;
             }
 
             let slice = bytes::Bytes::copy_from_slice(&buffer[offset..offset + record_len]);
-            let record = WalRecord::decode(slice)?;
-            records.push(record);
-            offset += record_len;
+            match WalRecord::decode(slice) {
+                Ok(record) => {
+                    records.push(record);
+                    offset += record_len;
+                }
+                Err(_) => {
+                    // Corrupted record encountered — stop recovery here to preserve
+                    // all committed preceding records rather than discarding everything
+                    break;
+                }
+            }
         }
 
         Ok(records)
@@ -166,6 +176,21 @@ mod tests {
         let mut reader_after_reset = WalReader::open(&wal_path)?;
         let records_after_reset = reader_after_reset.read_all()?;
         assert_eq!(records_after_reset.len(), 0);
+
+        // Test recovery with corrupt trailing bytes
+        writer.append(&r1)?;
+        writer.append(&r2)?;
+        // Append partial/garbage bytes to simulate uncommitted torn write
+        {
+            let mut raw_file = std::fs::OpenOptions::new().append(true).open(&wal_path)?;
+            raw_file.write_all(b"\xDE\xAD\xBE\xEF\x00\x00")?;
+            raw_file.sync_all()?;
+        }
+        let mut reader_torn = WalReader::open(&wal_path)?;
+        let recovered = reader_torn.read_all()?;
+        assert_eq!(recovered.len(), 2);
+        assert_eq!(recovered[0].key, r1.key);
+        assert_eq!(recovered[1].key, r2.key);
 
         Ok(())
     }

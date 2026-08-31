@@ -113,9 +113,9 @@ impl LruInner {
 
         if self.map.len() >= self.capacity {
             if let Some(lru_idx) = self.tail {
+                self.detach(lru_idx);
                 if let Some(lru_node) = self.nodes[lru_idx].take() {
                     self.map.remove(&lru_node.key);
-                    self.detach(lru_idx);
                     self.free_indices.push(lru_idx);
                 }
             }

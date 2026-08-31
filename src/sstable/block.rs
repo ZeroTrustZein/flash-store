@@ -35,7 +35,17 @@ impl Block {
 
         let len = data.len();
         let num_offsets = u32::from_le_bytes(data[len - 4..len].try_into().unwrap()) as usize;
-        let offsets_start = len - 4 - num_offsets * 4;
+        let total_offsets_bytes = num_offsets.checked_mul(4).ok_or_else(|| {
+            crate::error::FlashStoreError::Corruption("corrupted offsets count".into())
+        })?;
+
+        if len < 4 + total_offsets_bytes {
+            return Err(crate::error::FlashStoreError::Corruption(
+                "num_offsets exceeds block length".into(),
+            ));
+        }
+
+        let offsets_start = len - 4 - total_offsets_bytes;
 
         let mut offsets = Vec::with_capacity(num_offsets);
         let mut offset_bytes = &data[offsets_start..len - 4];
@@ -56,8 +66,14 @@ impl Block {
         }
 
         let start = self.offsets[index] as usize;
+        if start + 4 > self.data.len() {
+            return None;
+        }
         let mut slice = &self.data[start..];
         let len = slice.get_u32_le() as usize;
+        if slice.len() < len {
+            return None;
+        }
         let entry_bytes = &slice[..len];
         bincode::deserialize(entry_bytes).ok()
     }
