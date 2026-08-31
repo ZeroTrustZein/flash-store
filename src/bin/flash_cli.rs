@@ -1,72 +1,58 @@
-use clap::{Parser, Subcommand};
-use flash_store::prelude::*;
+use clap::Parser;
+use flash_store::cli::{Cmd, GlobalOpts};
+use flash_store::error::Result;
 use std::path::PathBuf;
 
-#[derive(Parser)]
-#[command(name = "flash-cli", about = "CLI tool for FlashStore LSM-Tree KV engine")]
+#[derive(Parser, Debug)]
+#[command(
+    name = "flash-cli",
+    about = "Production-grade CLI & REPL for FlashStore LSM-Tree Key-Value Engine",
+    version
+)]
 struct Cli {
+    /// Path to the FlashStore data directory
     #[arg(short, long, default_value = "./data")]
     path: PathBuf,
 
-    #[command(subcommand)]
-    command: Commands,
-}
+    /// Override memtable size threshold in bytes
+    #[arg(long)]
+    memtable_size: Option<usize>,
 
-#[derive(Subcommand)]
-enum Commands {
-    Put { key: String, value: String },
-    Get { key: String },
-    Delete { key: String },
-    Flush,
-    Compact,
-    Stats,
-    Repl,
+    /// Override SSTable block size in bytes
+    #[arg(long)]
+    block_size: Option<usize>,
+
+    /// Enable synchronous WAL writes
+    #[arg(long)]
+    sync_wal: bool,
+
+    /// Override block cache size in bytes
+    #[arg(long)]
+    block_cache_size: Option<usize>,
+
+    /// Emit JSON output where applicable
+    #[arg(long)]
+    json: bool,
+
+    /// Suppress verbose / informational output
+    #[arg(short, long)]
+    quiet: bool,
+
+    #[command(subcommand)]
+    command: Cmd,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let options = OptionsBuilder::new().dir(cli.path).build();
-    let db = FlashStore::open(options)?;
+    let opts = GlobalOpts {
+        path: cli.path,
+        memtable_size: cli.memtable_size,
+        block_size: cli.block_size,
+        sync_wal: cli.sync_wal,
+        block_cache_size: cli.block_cache_size,
+        json: cli.json,
+        quiet: cli.quiet,
+    };
 
-    match cli.command {
-        Commands::Put { key, value } => {
-            db.put(key.into_bytes(), value.into_bytes())?;
-            println!("OK");
-        }
-        Commands::Get { key } => {
-            match db.get(key.into_bytes())? {
-                Some(val) => {
-                    let s = String::from_utf8_lossy(&val);
-                    println!("{}", s);
-                }
-                None => println!("(nil)"),
-            }
-        }
-        Commands::Delete { key } => {
-            db.delete(key.into_bytes())?;
-            println!("OK");
-        }
-        Commands::Flush => {
-            db.flush()?;
-            println!("Flushed successfully.");
-        }
-        Commands::Compact => {
-            db.compact()?;
-            println!("Compaction triggered.");
-        }
-        Commands::Stats => {
-            let stats = db.stats();
-            println!("Active memtable bytes: {}", stats.active_memtable_size);
-            println!("Immutable memtables: {}", stats.immutable_memtables_count);
-            for (lvl, count) in stats.levels_file_count.iter().enumerate() {
-                println!("Level {}: {} SSTables", lvl, count);
-            }
-        }
-        Commands::Repl => {
-            println!("FlashStore REPL - type 'exit' to quit");
-            // Placeholder REPL
-        }
-    }
-
-    Ok(())
+    flash_store::cli::run(cli.command, &opts)
 }
