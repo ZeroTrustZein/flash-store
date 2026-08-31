@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+*.db
+*.log
+*.tmp
+.DS_Store
+.idea
+.vscode
+*.swp
