@@ -59,7 +59,8 @@ impl BloomFilter {
     ///
     /// Returns `true` if the key may be present (or if the filter is too small/empty),
     /// or `false` if the key is definitely not present in the set.
-    pub fn may_contain(filter_bytes: &Bytes, key: &[u8]) -> bool {
+    #[inline]
+    pub fn may_contain(filter_bytes: &[u8], key: &[u8]) -> bool {
         if filter_bytes.len() <= 1 {
             return true;
         }

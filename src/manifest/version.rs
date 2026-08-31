@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileMetaData {
     pub file_number: u64,
     pub file_size: u64,
@@ -9,7 +9,7 @@ pub struct FileMetaData {
     pub largest_key: Bytes,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct VersionEdit {
     pub next_file_number: Option<u64>,
     pub last_sequence: Option<u64>,

@@ -58,6 +58,7 @@ pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
+pub use sstable::{table_file_name, table_path};
 pub use types::{
     ChecksumType, CompressionType, DefaultUserKeyComparator, Entry, InternalKey, IntoBytes, Key,
     KeyRange, SequenceNumber, UserKey, UserKeyComparator, Value, ValueType, MAX_SEQUENCE_NUMBER,
@@ -75,6 +76,7 @@ pub mod prelude {
     pub use crate::iterator::{
         MemtableIterator, MergingIterator, SSTableIterator, StorageIterator,
     };
+    pub use crate::sstable::{table_file_name, table_path};
     pub use crate::types::{
         ChecksumType, CompressionType, DefaultUserKeyComparator, Entry, InternalKey, IntoBytes,
         Key, KeyRange, SequenceNumber, UserKey, UserKeyComparator, Value, ValueType,

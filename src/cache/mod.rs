@@ -89,8 +89,10 @@ impl LruInner {
 
     fn get(&mut self, key: &(u64, u64)) -> Option<Bytes> {
         if let Some(&idx) = self.map.get(key) {
-            self.detach(idx);
-            self.attach_head(idx);
+            if self.head != Some(idx) {
+                self.detach(idx);
+                self.attach_head(idx);
+            }
             self.nodes[idx].as_ref().map(|n| n.value.clone())
         } else {
             None

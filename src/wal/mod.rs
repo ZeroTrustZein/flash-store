@@ -1,14 +1,14 @@
 pub mod record;
 
 use crate::error::Result;
-use parking_lot::Mutex;
+use bytes::{Bytes, BytesMut};
 use record::WalRecord;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub struct WalWriter {
-    file: Mutex<File>,
+    file: File,
     path: PathBuf,
     sync: bool,
 }
@@ -23,52 +23,50 @@ impl WalWriter {
             .open(&path)?;
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
-            file: Mutex::new(file),
+            file,
             path: path.as_ref().to_path_buf(),
             sync,
         })
     }
 
     #[inline]
-    pub fn append(&self, record: &WalRecord) -> Result<()> {
+    pub fn append(&mut self, record: &WalRecord) -> Result<()> {
         let encoded = record.encode();
-        let mut file = self.file.lock();
-        file.write_all(&encoded)?;
+        self.file.write_all(&encoded)?;
         if self.sync {
-            file.sync_all()?;
+            self.file.sync_all()?;
         }
         Ok(())
     }
 
-    pub fn append_batch(&self, records: &[WalRecord]) -> Result<()> {
+    pub fn append_batch(&mut self, records: &[WalRecord]) -> Result<()> {
         if records.is_empty() {
             return Ok(());
         }
-        let mut file = self.file.lock();
+        let mut batch_buf = BytesMut::new();
         for record in records {
             let encoded = record.encode();
-            file.write_all(&encoded)?;
+            batch_buf.extend_from_slice(&encoded);
         }
+        self.file.write_all(&batch_buf)?;
         if self.sync {
-            file.sync_all()?;
+            self.file.sync_all()?;
         }
         Ok(())
     }
 
-    pub fn reset(&self) -> Result<()> {
-        let mut file = self.file.lock();
-        file.set_len(0)?;
-        file.seek(SeekFrom::Start(0))?;
+    pub fn reset(&mut self) -> Result<()> {
+        self.file.set_len(0)?;
+        self.file.seek(SeekFrom::Start(0))?;
         if self.sync {
-            file.sync_all()?;
+            self.file.sync_all()?;
         }
         Ok(())
     }
 
     #[inline]
-    pub fn sync(&self) -> Result<()> {
-        let file = self.file.lock();
-        file.sync_all()?;
+    pub fn sync(&mut self) -> Result<()> {
+        self.file.sync_all()?;
         Ok(())
     }
 
@@ -94,20 +92,21 @@ impl WalReader {
         let mut buffer = Vec::new();
         self.file.read_to_end(&mut buffer)?;
 
+        let bytes_buf = Bytes::from(buffer);
         let mut offset = 0;
-        while offset + 8 <= buffer.len() {
-            let len_bytes: [u8; 4] = match buffer[offset + 4..offset + 8].try_into() {
+        while offset + 8 <= bytes_buf.len() {
+            let len_bytes: [u8; 4] = match bytes_buf[offset + 4..offset + 8].try_into() {
                 Ok(b) => b,
                 Err(_) => break,
             };
             let payload_len = u32::from_le_bytes(len_bytes) as usize;
             let record_len = 8 + payload_len;
-            if offset + record_len > buffer.len() {
+            if offset + record_len > bytes_buf.len() {
                 // Incomplete payload at end of WAL (torn write)
                 break;
             }
 
-            let slice = bytes::Bytes::copy_from_slice(&buffer[offset..offset + record_len]);
+            let slice = bytes_buf.slice(offset..offset + record_len);
             match WalRecord::decode(slice) {
                 Ok(record) => {
                     records.push(record);
@@ -135,7 +134,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let wal_path = dir.path().join("test.wal");
 
-        let writer = WalWriter::open(&wal_path, true)?;
+        let mut writer = WalWriter::open(&wal_path, true)?;
         assert_eq!(writer.path(), wal_path);
 
         let r1 = WalRecord {

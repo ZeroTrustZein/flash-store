@@ -272,7 +272,7 @@ fn test_cli_inspect_sstable() -> Result<()> {
     db.put(Bytes::from_static(b"inspect_b"), Bytes::from_static(b"200"))?;
     db.flush()?;
 
-    let sst_path = dir.path().join("000001.sst");
+    let sst_path = flash_store::sstable::table_path(dir.path(), 1);
     assert!(sst_path.exists());
 
     // Inspect by direct path

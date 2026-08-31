@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn test_inspect_sst_execution() -> Result<()> {
         let dir = tempdir().unwrap();
-        let sst_path = dir.path().join("000001.sst");
+        let sst_path = crate::sstable::table_path(dir.path(), 1);
         let options = OptionsBuilder::new().block_size(64).build();
 
         let mut builder = TableBuilder::new(&sst_path, options)?;

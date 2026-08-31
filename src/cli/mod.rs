@@ -278,7 +278,7 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
             };
             // Resolve path: if it looks like a number, look for it in opts.path dir
             let sst_path = if let Ok(num) = path.parse::<u64>() {
-                opts.path.join(format!("{:06}.sst", num))
+                crate::sstable::table_path(&opts.path, num)
             } else {
                 PathBuf::from(&path)
             };

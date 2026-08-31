@@ -128,7 +128,8 @@ impl VersionSet {
     }
 
     pub fn log_and_apply(&self, edit: VersionEdit) {
-        let mut current_levels = self.current.read().levels.clone();
+        let mut current_guard = self.current.write();
+        let mut current_levels = current_guard.levels.clone();
 
         for (level, file_number) in edit.deleted_files {
             if level < current_levels.len() {
@@ -163,7 +164,7 @@ impl VersionSet {
             }
         }
 
-        *self.current.write() = Arc::new(Version {
+        *current_guard = Arc::new(Version {
             levels: current_levels,
         });
     }

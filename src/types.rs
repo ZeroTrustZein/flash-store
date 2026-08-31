@@ -763,11 +763,12 @@ impl KeyRange {
     /// Create a single-point key range `[key, key + \0)`.
     pub fn point(key: impl IntoBytes) -> Self {
         let k = key.into_bytes();
-        let mut end = k.to_vec();
-        end.push(0);
+        let mut end = BytesMut::with_capacity(k.len() + 1);
+        end.put_slice(&k);
+        end.put_u8(0);
         Self {
             start: Some(k),
-            end: Some(Bytes::from(end)),
+            end: Some(end.freeze()),
         }
     }
 

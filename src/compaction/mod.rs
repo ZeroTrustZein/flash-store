@@ -1,7 +1,7 @@
 use crate::config::Options;
 use crate::error::Result;
 use crate::manifest::version::{FileMetaData, VersionEdit};
-use crate::sstable::{TableBuilder, TableReader};
+use crate::sstable::{table_path, TableBuilder, TableReader};
 use crate::types::{Entry, Key, ValueType};
 use bytes::Bytes;
 use std::collections::BTreeMap;
@@ -145,10 +145,10 @@ impl Compactor {
         // 1. Gather all entries from all source and target input files
         let mut all_files = Vec::new();
         for f in &task.input_files {
-            all_files.push(dir.join(format!("{:06}.sst", f.file_number)));
+            all_files.push(table_path(dir, f.file_number));
         }
         for f in &task.target_input_files {
-            all_files.push(dir.join(format!("{:06}.sst", f.file_number)));
+            all_files.push(table_path(dir, f.file_number));
         }
 
         // Map key -> (highest seq_no, Entry)
@@ -197,7 +197,7 @@ impl Compactor {
         // Write new SSTable(s) if there are surviving entries
         if !final_entries.is_empty() {
             let file_num = next_file_number();
-            let sst_path = dir.join(format!("{:06}.sst", file_num));
+            let sst_path = table_path(dir, file_num);
             let mut builder = TableBuilder::new(&sst_path, options.clone())?;
 
             let smallest_key = final_entries.first().unwrap().key.clone();
@@ -269,7 +269,7 @@ mod tests {
         let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
 
         // Create L0 SSTable with key "k1" (seq 1, value "v1_old") and "k2" (seq 2, value "v2")
-        let sst1_path = dir.path().join("000001.sst");
+        let sst1_path = table_path(dir.path(), 1);
         let mut b1 = TableBuilder::new(&sst1_path, options.clone())?;
         b1.add(Entry::new_value(
             Bytes::from_static(b"k1"),
@@ -284,7 +284,7 @@ mod tests {
         let size1 = b1.finish()?;
 
         // Create L1 SSTable with key "k1" (seq 5, value "v1_new") and "k3" (seq 3, value "v3")
-        let sst2_path = dir.path().join("000002.sst");
+        let sst2_path = table_path(dir.path(), 2);
         let mut b2 = TableBuilder::new(&sst2_path, options.clone())?;
         b2.add(Entry::new_value(
             Bytes::from_static(b"k1"),
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(edit.new_files[0].1.file_number, 10);
 
         // Verify output SSTable contents
-        let out_path = dir.path().join("000010.sst");
+        let out_path = table_path(dir.path(), 10);
         let mut reader = TableReader::open(&out_path)?;
         let entries = reader.read_all_entries()?;
         assert_eq!(entries.len(), 3);
@@ -349,7 +349,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
 
-        let sst1_path = dir.path().join("000001.sst");
+        let sst1_path = table_path(dir.path(), 1);
         let mut b1 = TableBuilder::new(&sst1_path, options.clone())?;
         b1.add(Entry::new_tombstone(Bytes::from_static(b"dead_key"), 10))?;
         let size1 = b1.finish()?;
