@@ -51,7 +51,7 @@ impl<const N: usize> IntoBytes for &[u8; N] {
 impl<const N: usize> IntoBytes for [u8; N] {
     #[inline]
     fn into_bytes(self) -> Bytes {
-        Bytes::copy_from_slice(self.as_slice())
+        Bytes::copy_from_slice(&self[..])
     }
 }
 
