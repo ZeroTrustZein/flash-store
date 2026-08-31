@@ -106,7 +106,7 @@ impl<I: StorageIterator> Ord for HeapNode<I> {
             .iter
             .key()
             .cmp(self.iter.key())
-            .then_with(|| self.index.cmp(&other.index))
+            .then_with(|| other.index.cmp(&self.index))
     }
 }
 

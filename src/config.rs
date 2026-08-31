@@ -17,13 +17,13 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             dir: PathBuf::from("./data"),
-            memtable_size: 4 * 1024 * 1024,      // 4 MB
-            block_size: 4 * 1024,                // 4 KB
-            bloom_bits_per_key: 10,              // ~1% false positive rate
+            memtable_size: 4 * 1024 * 1024, // 4 MB
+            block_size: 4 * 1024,           // 4 KB
+            bloom_bits_per_key: 10,         // ~1% false positive rate
             max_levels: 7,
             base_level_size_bytes: 10 * 1024 * 1024, // 10 MB
             sync_wal: false,
-            block_cache_size: 64 * 1024 * 1024,  // 64 MB
+            block_cache_size: 64 * 1024 * 1024, // 64 MB
             create_if_missing: true,
         }
     }

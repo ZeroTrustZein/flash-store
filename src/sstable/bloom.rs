@@ -36,7 +36,7 @@ impl BloomFilter {
         if bits < 64 {
             bits = 64;
         }
-        let bytes = (bits + 7) / 8;
+        let bytes = bits.div_ceil(8);
         let mut filter = vec![0u8; bytes + 1]; // last byte stores k
         filter[bytes] = self.k_hashes as u8;
 
@@ -44,7 +44,7 @@ impl BloomFilter {
 
         for key in keys {
             let mut h = crc32fast::hash(key);
-            let delta = (h >> 17) | (h << 15);
+            let delta = h.rotate_left(15);
             for _ in 0..self.k_hashes {
                 let bit_pos = (h % num_bits) as usize;
                 filter[bit_pos / 8] |= 1 << (bit_pos % 8);
@@ -69,7 +69,7 @@ impl BloomFilter {
         let num_bits = (bytes_len * 8) as u32;
 
         let mut h = crc32fast::hash(key);
-        let delta = (h >> 17) | (h << 15);
+        let delta = h.rotate_left(15);
         for _ in 0..k {
             let bit_pos = (h % num_bits) as usize;
             if (filter_bytes[bit_pos / 8] & (1 << (bit_pos % 8))) == 0 {

@@ -17,7 +17,8 @@ impl WriteBatch {
     }
 
     pub fn put<K: IntoBytes, V: IntoBytes>(&mut self, key: K, value: V) {
-        self.ops.push(BatchOp::Put(key.into_bytes(), value.into_bytes()));
+        self.ops
+            .push(BatchOp::Put(key.into_bytes(), value.into_bytes()));
     }
 
     pub fn delete<K: IntoBytes>(&mut self, key: K) {

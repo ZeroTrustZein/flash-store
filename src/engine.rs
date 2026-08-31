@@ -144,7 +144,7 @@ impl FlashStore {
         let version = self.inner.version_set.current();
 
         // Level 0: search files in reverse order (newest to oldest)
-        if let Some(l0) = version.levels.get(0) {
+        if let Some(l0) = version.levels.first() {
             for file_meta in l0.iter().rev() {
                 let file_path = self
                     .inner
@@ -167,7 +167,7 @@ impl FlashStore {
         // Level 1..N: files are non-overlapping and sorted by key range
         for level in version.levels.iter().skip(1) {
             for file_meta in level {
-                if &key < &file_meta.smallest_key || &key > &file_meta.largest_key {
+                if key < file_meta.smallest_key || key > file_meta.largest_key {
                     continue;
                 }
                 let file_path = self
@@ -271,11 +271,7 @@ impl FlashStore {
         };
 
         let file_num = self.inner.version_set.next_file_number();
-        let sst_path = self
-            .inner
-            .options
-            .dir
-            .join(format!("{:06}.sst", file_num));
+        let sst_path = self.inner.options.dir.join(format!("{:06}.sst", file_num));
         let mut builder = TableBuilder::new(&sst_path, self.inner.options.clone())?;
 
         let mut iter = old_mem.iter();
@@ -437,12 +433,12 @@ impl FlashStore {
                 continue;
             }
             if let Some(ref start) = start_key {
-                if &key < start {
+                if key < *start {
                     continue;
                 }
             }
             if let Some(ref end) = end_key {
-                if &key >= end {
+                if key >= *end {
                     continue;
                 }
             }
@@ -537,10 +533,7 @@ mod tests {
     #[test]
     fn test_engine_compaction_and_data_integrity() -> Result<()> {
         let dir = tempdir().unwrap();
-        let options = OptionsBuilder::new()
-            .dir(dir.path())
-            .block_size(64)
-            .build();
+        let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
         let db = FlashStore::open(options)?;
 
         // Produce 4 SSTables in L0

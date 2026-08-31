@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -275,7 +275,10 @@ impl TryFrom<u8> for CompressionType {
     #[inline]
     fn try_from(val: u8) -> std::result::Result<Self, Self::Error> {
         CompressionType::from_u8(val).ok_or_else(|| {
-            crate::error::FlashStoreError::Corruption(format!("Invalid CompressionType byte: {}", val))
+            crate::error::FlashStoreError::Corruption(format!(
+                "Invalid CompressionType byte: {}",
+                val
+            ))
         })
     }
 }
@@ -379,11 +382,7 @@ impl Entry {
 
     /// Create a new value entry.
     #[inline]
-    pub fn new_value(
-        key: impl IntoBytes,
-        value: impl IntoBytes,
-        seq_no: SequenceNumber,
-    ) -> Self {
+    pub fn new_value(key: impl IntoBytes, value: impl IntoBytes, seq_no: SequenceNumber) -> Self {
         Self::new(key, value, ValueType::Value, seq_no)
     }
 
@@ -531,11 +530,7 @@ pub struct InternalKey {
 impl InternalKey {
     /// Create a new InternalKey.
     #[inline]
-    pub fn new(
-        user_key: impl IntoBytes,
-        seq_no: SequenceNumber,
-        value_type: ValueType,
-    ) -> Self {
+    pub fn new(user_key: impl IntoBytes, seq_no: SequenceNumber, value_type: ValueType) -> Self {
         Self {
             user_key: user_key.into_bytes(),
             seq_no,
@@ -589,7 +584,9 @@ impl InternalKey {
         let user_key = Bytes::copy_from_slice(&data[0..user_key_len]);
         let seq_bytes: [u8; 8] = data[user_key_len..user_key_len + 8]
             .try_into()
-            .map_err(|_| crate::error::FlashStoreError::Corruption("invalid seq_no bytes".into()))?;
+            .map_err(|_| {
+                crate::error::FlashStoreError::Corruption("invalid seq_no bytes".into())
+            })?;
         let seq_no = u64::from_be_bytes(seq_bytes);
         let val_type_byte = data[user_key_len + 8];
         let value_type = ValueType::try_from(val_type_byte)?;
@@ -613,7 +610,9 @@ impl InternalKey {
         let user_key = data.slice(0..user_key_len);
         let seq_bytes: [u8; 8] = data[user_key_len..user_key_len + 8]
             .try_into()
-            .map_err(|_| crate::error::FlashStoreError::Corruption("invalid seq_no bytes".into()))?;
+            .map_err(|_| {
+                crate::error::FlashStoreError::Corruption("invalid seq_no bytes".into())
+            })?;
         let seq_no = u64::from_be_bytes(seq_bytes);
         let val_type_byte = data[user_key_len + 8];
         let value_type = ValueType::try_from(val_type_byte)?;
@@ -903,9 +902,15 @@ mod tests {
         assert_eq!(cow_owned.into_bytes(), Bytes::from_static(&[50, 60]));
 
         let cow_str_borrowed: Cow<'_, str> = Cow::Borrowed("cow_str");
-        assert_eq!(cow_str_borrowed.into_bytes(), Bytes::from_static(b"cow_str"));
+        assert_eq!(
+            cow_str_borrowed.into_bytes(),
+            Bytes::from_static(b"cow_str")
+        );
         let cow_str_owned: Cow<'_, str> = Cow::Owned("cow_str_owned".to_string());
-        assert_eq!(cow_str_owned.into_bytes(), Bytes::from_static(b"cow_str_owned"));
+        assert_eq!(
+            cow_str_owned.into_bytes(),
+            Bytes::from_static(b"cow_str_owned")
+        );
 
         let arc_slice: Arc<[u8]> = Arc::from(vec![70, 80].into_boxed_slice());
         assert_eq!(arc_slice.into_bytes(), Bytes::from_static(&[70, 80]));
@@ -988,7 +993,7 @@ mod tests {
         assert_eq!(tombstone.value_type(), ValueType::Tombstone);
         assert!(tombstone.is_tombstone());
         assert!(!tombstone.is_value());
-        assert_eq!(tombstone.estimated_size(), 2 + 0 + 8 + 1);
+        assert_eq!(tombstone.estimated_size(), 2 + 8 + 1);
 
         let from_parts = Entry::from_parts(
             Bytes::from_static(b"kp"),
@@ -1049,8 +1054,7 @@ mod tests {
         assert!(decoded.is_value());
         assert!(!decoded.is_tombstone());
 
-        let decoded_slice =
-            InternalKey::decode_from_slice(&encoded).expect("decode from slice");
+        let decoded_slice = InternalKey::decode_from_slice(&encoded).expect("decode from slice");
         assert_eq!(internal_key, decoded_slice);
 
         let tombstone_ik = InternalKey::new_tombstone(user_key.clone(), 999);

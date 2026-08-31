@@ -52,9 +52,8 @@ impl TableReader {
         file.seek(SeekFrom::Start(footer.index_offset))?;
         let mut index_buf = vec![0u8; footer.index_size as usize];
         file.read_exact(&mut index_buf)?;
-        let (first_keys, block_offsets): (Vec<Bytes>, Vec<u64>) =
-            bincode::deserialize(&index_buf)
-                .map_err(|e| FlashStoreError::Corruption(e.to_string()))?;
+        let (first_keys, block_offsets): (Vec<Bytes>, Vec<u64>) = bincode::deserialize(&index_buf)
+            .map_err(|e| FlashStoreError::Corruption(e.to_string()))?;
 
         Ok(Self {
             file,
@@ -94,7 +93,7 @@ impl TableReader {
         let block = self.read_block(block_idx)?;
         for i in 0..block.entries_len() {
             if let Some(entry) = block.get_entry(i) {
-                if &entry.key == key {
+                if entry.key == *key {
                     if entry.value_type == ValueType::Tombstone {
                         return Ok(Some(None));
                     } else {
@@ -204,7 +203,11 @@ mod tests {
 
         let mut builder = TableBuilder::new(&sst_path, options)?;
         let e1 = Entry::new_value(Bytes::from_static(b"apple"), Bytes::from_static(b"red"), 1);
-        let e2 = Entry::new_value(Bytes::from_static(b"banana"), Bytes::from_static(b"yellow"), 2);
+        let e2 = Entry::new_value(
+            Bytes::from_static(b"banana"),
+            Bytes::from_static(b"yellow"),
+            2,
+        );
         builder.add(e1)?;
         builder.add(e2)?;
         builder.finish()?;

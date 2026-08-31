@@ -16,11 +16,7 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             file: Mutex::new(file),
             path: path.as_ref().to_path_buf(),
@@ -140,7 +136,8 @@ impl VersionSet {
             if level < current_levels.len() {
                 let current_next = self.next_file_number.load(Ordering::SeqCst);
                 if meta.file_number >= current_next {
-                    self.next_file_number.store(meta.file_number + 1, Ordering::SeqCst);
+                    self.next_file_number
+                        .store(meta.file_number + 1, Ordering::SeqCst);
                 }
                 current_levels[level].push(meta);
             }

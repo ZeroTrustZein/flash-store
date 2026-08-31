@@ -83,12 +83,7 @@ impl TableBuilder {
         self.offset += index_size;
 
         // Write Footer
-        let footer = Footer::new(
-            meta_index_offset,
-            meta_index_size,
-            index_offset,
-            index_size,
-        );
+        let footer = Footer::new(meta_index_offset, meta_index_size, index_offset, index_size);
         let footer_bytes = footer.encode();
         self.file.write_all(&footer_bytes)?;
         self.offset += footer_bytes.len() as u64;

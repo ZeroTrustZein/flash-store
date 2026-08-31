@@ -16,7 +16,10 @@ pub fn format_kv_pairs(pairs: &[(Key, Value)], format: OutputFormat, quiet: bool
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&json_array).unwrap_or_else(|_| "[]".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_array).unwrap_or_else(|_| "[]".into())
+            );
         }
         OutputFormat::Tsv => {
             for (k, v) in pairs {
@@ -35,7 +38,11 @@ pub fn format_kv_pairs(pairs: &[(Key, Value)], format: OutputFormat, quiet: bool
                 return;
             }
             for (k, v) in pairs {
-                println!("{}: {}", String::from_utf8_lossy(k), String::from_utf8_lossy(v));
+                println!(
+                    "{}: {}",
+                    String::from_utf8_lossy(k),
+                    String::from_utf8_lossy(v)
+                );
             }
             if !quiet {
                 println!("Total entries: {}", pairs.len());
@@ -54,20 +61,32 @@ pub fn format_stats(stats: &Stats, format: OutputFormat) {
                 "levels_file_count": stats.levels_file_count,
                 "total_sstable_files": stats.levels_file_count.iter().sum::<usize>(),
             });
-            println!("{}", serde_json::to_string_pretty(&json_obj).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_obj).unwrap_or_else(|_| "{}".into())
+            );
         }
         OutputFormat::Tsv => {
             println!("metric\tvalue");
             println!("active_memtable_size_bytes\t{}", stats.active_memtable_size);
-            println!("immutable_memtables_count\t{}", stats.immutable_memtables_count);
+            println!(
+                "immutable_memtables_count\t{}",
+                stats.immutable_memtables_count
+            );
             for (lvl, count) in stats.levels_file_count.iter().enumerate() {
                 println!("level_{}_sstable_count\t{}", lvl, count);
             }
         }
         OutputFormat::Text => {
             println!("=== FlashStore Statistics ===");
-            println!("Active Memtable Size:     {} bytes", stats.active_memtable_size);
-            println!("Immutable Memtables:      {}", stats.immutable_memtables_count);
+            println!(
+                "Active Memtable Size:     {} bytes",
+                stats.active_memtable_size
+            );
+            println!(
+                "Immutable Memtables:      {}",
+                stats.immutable_memtables_count
+            );
             let total_sst: usize = stats.levels_file_count.iter().sum();
             println!("Total SSTable Files:      {}", total_sst);
             println!("Levels Distribution:");

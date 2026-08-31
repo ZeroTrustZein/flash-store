@@ -19,6 +19,7 @@ impl WalWriter {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&path)?;
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
@@ -167,7 +168,7 @@ mod tests {
         assert_eq!(records[1].key, r2.key);
         assert_eq!(records[1].seq_no, 2);
         assert_eq!(records[2].key, r3.key);
-        assert_eq!(records[2].is_delete, true);
+        assert!(records[2].is_delete);
         assert_eq!(records[2].seq_no, 3);
 
         // Reset WAL and verify empty

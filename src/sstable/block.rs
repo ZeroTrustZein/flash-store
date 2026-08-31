@@ -30,7 +30,9 @@ impl Block {
 
     pub fn decode(data: Bytes) -> crate::error::Result<Self> {
         if data.len() < 4 {
-            return Err(crate::error::FlashStoreError::Corruption("block too short".into()));
+            return Err(crate::error::FlashStoreError::Corruption(
+                "block too short".into(),
+            ));
         }
 
         let len = data.len();
