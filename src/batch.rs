@@ -1,4 +1,4 @@
-use crate::types::{Key, Value, ValueType};
+use crate::types::{IntoBytes, Key, Value};
 
 #[derive(Debug, Clone)]
 pub enum BatchOp {
@@ -16,12 +16,12 @@ impl WriteBatch {
         Self { ops: Vec::new() }
     }
 
-    pub fn put<K: Into<Key>, V: Into<Value>>(&mut self, key: K, value: V) {
-        self.ops.push(BatchOp::Put(key.into(), value.into()));
+    pub fn put<K: IntoBytes, V: IntoBytes>(&mut self, key: K, value: V) {
+        self.ops.push(BatchOp::Put(key.into_bytes(), value.into_bytes()));
     }
 
-    pub fn delete<K: Into<Key>>(&mut self, key: K) {
-        self.ops.push(BatchOp::Delete(key.into()));
+    pub fn delete<K: IntoBytes>(&mut self, key: K) {
+        self.ops.push(BatchOp::Delete(key.into_bytes()));
     }
 
     pub fn len(&self) -> usize {

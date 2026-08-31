@@ -1,7 +1,6 @@
 use crate::error::Result;
 use crate::memtable::skiplist::SkipListIter;
 use crate::types::{Entry, Key, Value};
-use bytes::Bytes;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -177,6 +176,7 @@ impl<I: StorageIterator> StorageIterator for MergingIterator<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
 
     #[test]
     fn test_sstable_iterator() {

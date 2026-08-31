@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 pub trait BlockCache: Send + Sync {
     fn get(&self, key: &(u64, u64)) -> Option<Bytes>;

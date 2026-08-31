@@ -28,7 +28,7 @@ impl Block {
         buf.freeze()
     }
 
-    pub fn decode(mut data: Bytes) -> crate::error::Result<Self> {
+    pub fn decode(data: Bytes) -> crate::error::Result<Self> {
         if data.len() < 4 {
             return Err(crate::error::FlashStoreError::Corruption("block too short".into()));
         }

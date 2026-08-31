@@ -20,7 +20,7 @@ pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
-pub use types::{Entry, InternalKey, Key, SequenceNumber, UserKey, Value, ValueType};
+pub use types::{Entry, InternalKey, IntoBytes, Key, SequenceNumber, UserKey, Value, ValueType};
 
 pub mod prelude {
     pub use crate::batch::WriteBatch;
@@ -31,5 +31,5 @@ pub mod prelude {
     pub use crate::engine::{FlashStore, Stats};
     pub use crate::error::{FlashStoreError, Result};
     pub use crate::iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
-    pub use crate::types::{Entry, InternalKey, Key, Value, ValueType};
+    pub use crate::types::{Entry, InternalKey, IntoBytes, Key, Value, ValueType};
 }

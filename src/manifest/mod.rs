@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use version::{FileMetaData, Version, VersionEdit};
+use version::{Version, VersionEdit};
 
 pub struct Manifest {
     file: Arc<parking_lot::Mutex<File>>,
@@ -25,6 +25,10 @@ impl Manifest {
             file: Arc::new(parking_lot::Mutex::new(file)),
             path: path.as_ref().to_path_buf(),
         })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn log_edit(&self, edit: &VersionEdit) -> Result<()> {
@@ -88,6 +92,10 @@ impl VersionSet {
         self.current.read().clone()
     }
 
+    pub fn max_levels(&self) -> usize {
+        self.max_levels
+    }
+
     pub fn next_file_number(&self) -> u64 {
         self.next_file_number.fetch_add(1, Ordering::SeqCst)
     }
@@ -149,6 +157,7 @@ impl VersionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::version::FileMetaData;
     use bytes::Bytes;
     use tempfile::tempdir;
 

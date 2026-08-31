@@ -16,11 +16,12 @@ pub struct WalWriter {
 
 impl WalWriter {
     pub fn open<P: AsRef<Path>>(path: P, sync: bool) -> Result<Self> {
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .create(true)
+            .read(true)
             .write(true)
-            .append(true)
             .open(&path)?;
+        file.seek(SeekFrom::End(0))?;
         Ok(Self {
             file: Arc::new(Mutex::new(file)),
             path: path.as_ref().to_path_buf(),
@@ -31,6 +32,7 @@ impl WalWriter {
     pub fn append(&self, record: &WalRecord) -> Result<()> {
         let encoded = record.encode();
         let mut file = self.file.lock();
+        file.seek(SeekFrom::End(0))?;
         file.write_all(&encoded)?;
         if self.sync {
             file.sync_all()?;
@@ -43,6 +45,7 @@ impl WalWriter {
             return Ok(());
         }
         let mut file = self.file.lock();
+        file.seek(SeekFrom::End(0))?;
         for record in records {
             let encoded = record.encode();
             file.write_all(&encoded)?;

@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/zeindergham/flash-store"
 
 [dependencies]
-bytes = "1.5"
+bytes = { version = "1.5", features = ["serde"] }
 parking_lot = "0.12"
 crossbeam-channel = "0.5"
 crc32fast = "1.3"

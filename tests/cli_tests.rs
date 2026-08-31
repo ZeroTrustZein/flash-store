@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use flash_store::cli::batch_parser::{parse_json_ops, parse_plain_lines};
 use flash_store::cli::formatter::{format_kv_pairs, format_stats};
-use flash_store::cli::inspect::inspect_sst;
 use flash_store::cli::repl::{execute_repl_command, tokenize_line};
 use flash_store::cli::{open_db, run, Cmd, GlobalOpts, OutputFormat};
 use flash_store::config::OptionsBuilder;
@@ -67,7 +66,8 @@ fn test_cli_put_get_delete_lifecycle() -> Result<()> {
     )?;
 
     // 5. Verify deleted
-    assert_eq!(db.get(Bytes::from_static(b"cli_key_1"))?, None);
+    let db2 = open_db(&opts)?;
+    assert_eq!(db2.get(Bytes::from_static(b"cli_key_1"))?, None);
 
     // 6. Get missing key in JSON & text
     run(

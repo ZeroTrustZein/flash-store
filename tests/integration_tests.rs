@@ -390,3 +390,207 @@ fn test_subsystems_merging_iterator_integration() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_large_keys_and_values() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .block_size(256)
+        .build();
+    let db = FlashStore::open(options)?;
+
+    // 16KB payload
+    let large_value = vec![b'x'; 16 * 1024];
+    let key = "large_payload_key";
+
+    db.put(key, &large_value)?;
+    assert_eq!(db.get(key)?, Some(bytes::Bytes::copy_from_slice(&large_value)));
+
+    // Flush and verify SSTable reader handles multi-block large values
+    db.flush()?;
+    assert_eq!(db.get(key)?, Some(bytes::Bytes::copy_from_slice(&large_value)));
+
+    Ok(())
+}
+
+#[test]
+fn test_empty_values_vs_tombstones() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // Put empty value
+    db.put(b"empty_val_key", b"")?;
+    assert_eq!(db.get(b"empty_val_key")?, Some(bytes::Bytes::new()));
+
+    // Flush to SSTable and verify empty value is still Some(Bytes::new())
+    db.flush()?;
+    assert_eq!(db.get(b"empty_val_key")?, Some(bytes::Bytes::new()));
+
+    // Now delete it
+    db.delete(b"empty_val_key")?;
+    assert_eq!(db.get(b"empty_val_key")?, None);
+
+    // Flush tombstone to SSTable
+    db.flush()?;
+    assert_eq!(db.get(b"empty_val_key")?, None);
+
+    Ok(())
+}
+
+#[test]
+fn test_range_scan_edge_cases() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    db.put(b"k10", b"v10")?;
+    db.put(b"k20", b"v20")?;
+    db.put(b"k30", b"v30")?;
+    db.flush()?;
+
+    // Inverted range [k30, k10) -> should be empty
+    let inverted = db.scan(
+        Some(bytes::Bytes::from_static(b"k30")),
+        Some(bytes::Bytes::from_static(b"k10")),
+    )?;
+    assert!(inverted.is_empty());
+
+    // Range before all keys [k00, k05) -> should be empty
+    let before = db.scan(
+        Some(bytes::Bytes::from_static(b"k00")),
+        Some(bytes::Bytes::from_static(b"k05")),
+    )?;
+    assert!(before.is_empty());
+
+    // Range after all keys [k40, k50) -> should be empty
+    let after = db.scan(
+        Some(bytes::Bytes::from_static(b"k40")),
+        Some(bytes::Bytes::from_static(b"k50")),
+    )?;
+    assert!(after.is_empty());
+
+    // Range with single key [k20, k21)
+    let single = db.scan(
+        Some(bytes::Bytes::from_static(b"k20")),
+        Some(bytes::Bytes::from_static(b"k21")),
+    )?;
+    assert_eq!(single.len(), 1);
+    assert_eq!(single[0].0, bytes::Bytes::from_static(b"k20"));
+
+    Ok(())
+}
+
+#[test]
+fn test_interleaved_flushes_deletions_compaction() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .block_size(64)
+        .build();
+    let db = FlashStore::open(options)?;
+
+    // Cycle 1: Put & Flush
+    for i in 0..20 {
+        db.put(format!("k_{:03}", i), format!("val_{:03}", i))?;
+    }
+    db.flush()?;
+
+    // Cycle 2: Overwrite even keys, delete odd keys & Flush
+    for i in 0..20 {
+        if i % 2 == 0 {
+            db.put(format!("k_{:03}", i), format!("val_updated_{:03}", i))?;
+        } else {
+            db.delete(format!("k_{:03}", i))?;
+        }
+    }
+    db.flush()?;
+
+    // Cycle 3: Add new keys & Compact
+    for i in 20..30 {
+        db.put(format!("k_{:03}", i), format!("val_{:03}", i))?;
+    }
+    db.flush()?;
+    db.compact()?;
+
+    // Verify state
+    for i in 0..20 {
+        if i % 2 == 0 {
+            assert_eq!(
+                db.get(format!("k_{:03}", i))?,
+                Some(bytes::Bytes::from(format!("val_updated_{:03}", i)))
+            );
+        } else {
+            assert_eq!(db.get(format!("k_{:03}", i))?, None);
+        }
+    }
+    for i in 20..30 {
+        assert_eq!(
+            db.get(format!("k_{:03}", i))?,
+            Some(bytes::Bytes::from(format!("val_{:03}", i)))
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_concurrent_batch_writes_and_scans() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .memtable_size(512)
+        .build();
+    let db = Arc::new(FlashStore::open(options)?);
+
+    let mut handles = Vec::new();
+
+    // 4 Batch Writer threads
+    for t in 0..4 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || -> Result<()> {
+            for b in 0..10 {
+                let mut batch = WriteBatch::new();
+                for i in 0..10 {
+                    let k = format!("th_{}_b_{}_k_{}", t, b, i);
+                    let v = format!("val_{}_{}_{}", t, b, i);
+                    batch.put(k, v);
+                }
+                db_clone.write_batch(batch)?;
+            }
+            Ok(())
+        }));
+    }
+
+    // 2 Scanner threads
+    for _ in 0..2 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || -> Result<()> {
+            for _ in 0..10 {
+                let _ = db_clone.scan(None, None)?;
+            }
+            Ok(())
+        }));
+    }
+
+    for handle in handles {
+        handle.join().unwrap()?;
+    }
+
+    // Verify that all 4 * 10 * 10 = 400 keys were written correctly
+    for t in 0..4 {
+        for b in 0..10 {
+            for i in 0..10 {
+                let k = format!("th_{}_b_{}_k_{}", t, b, i);
+                let expected = format!("val_{}_{}_{}", t, b, i);
+                assert_eq!(
+                    db.get(k)?,
+                    Some(bytes::Bytes::from(expected))
+                );
+            }
+        }
+    }
+
+    Ok(())
+}

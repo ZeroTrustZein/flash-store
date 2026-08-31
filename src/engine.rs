@@ -7,7 +7,7 @@ use crate::manifest::version::FileMetaData;
 use crate::manifest::{Manifest, VersionSet};
 use crate::memtable::MemTable;
 use crate::sstable::{TableBuilder, TableReader};
-use crate::types::{Entry, Key, Value, ValueType};
+use crate::types::{Entry, IntoBytes, Key, Value, ValueType};
 use crate::wal::record::WalRecord;
 use crate::wal::{WalReader, WalWriter};
 use parking_lot::RwLock;
@@ -100,9 +100,9 @@ impl FlashStore {
         Ok(Self { inner })
     }
 
-    pub fn put(&self, key: impl Into<Key>, value: impl Into<Value>) -> Result<()> {
-        let key = key.into();
-        let value = value.into();
+    pub fn put(&self, key: impl IntoBytes, value: impl IntoBytes) -> Result<()> {
+        let key = key.into_bytes();
+        let value = value.into_bytes();
         let seq = self.inner.version_set.next_sequence();
 
         let record = WalRecord {
@@ -118,8 +118,8 @@ impl FlashStore {
         Ok(())
     }
 
-    pub fn get(&self, key: impl Into<Key>) -> Result<Option<Value>> {
-        let key = key.into();
+    pub fn get(&self, key: impl IntoBytes) -> Result<Option<Value>> {
+        let key = key.into_bytes();
 
         // 1. Search active memtable
         if let Some(res) = self.inner.memtable.read().get(&key) {
@@ -187,8 +187,8 @@ impl FlashStore {
         Ok(None)
     }
 
-    pub fn delete(&self, key: impl Into<Key>) -> Result<()> {
-        let key = key.into();
+    pub fn delete(&self, key: impl IntoBytes) -> Result<()> {
+        let key = key.into_bytes();
         let seq = self.inner.version_set.next_sequence();
 
         let record = WalRecord {

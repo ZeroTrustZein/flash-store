@@ -1,5 +1,87 @@
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
+
+/// Trait for converting various byte-like representations into `Bytes` (`Key`/`Value`).
+pub trait IntoBytes {
+    fn into_bytes(self) -> Bytes;
+}
+
+impl IntoBytes for Bytes {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        self
+    }
+}
+
+impl IntoBytes for &Bytes {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        self.clone()
+    }
+}
+
+impl IntoBytes for Vec<u8> {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::from(self)
+    }
+}
+
+impl IntoBytes for &Vec<u8> {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self.as_slice())
+    }
+}
+
+impl IntoBytes for &[u8] {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self)
+    }
+}
+
+impl<const N: usize> IntoBytes for &[u8; N] {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self.as_slice())
+    }
+}
+
+impl<const N: usize> IntoBytes for [u8; N] {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self.as_slice())
+    }
+}
+
+impl IntoBytes for &str {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self.as_bytes())
+    }
+}
+
+impl IntoBytes for String {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::from(self)
+    }
+}
+
+impl IntoBytes for &String {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::copy_from_slice(self.as_bytes())
+    }
+}
+
+impl IntoBytes for Box<[u8]> {
+    #[inline]
+    fn into_bytes(self) -> Bytes {
+        Bytes::from(self)
+    }
+}
 
 /// Monotonic logical sequence number for versioning entries.
 pub type SequenceNumber = u64;
@@ -98,14 +180,14 @@ pub struct Entry {
 impl Entry {
     /// Create a new generic entry.
     pub fn new(
-        key: impl Into<Key>,
-        value: impl Into<Value>,
+        key: impl IntoBytes,
+        value: impl IntoBytes,
         value_type: ValueType,
         seq_no: SequenceNumber,
     ) -> Self {
         Self {
-            key: key.into(),
-            value: value.into(),
+            key: key.into_bytes(),
+            value: value.into_bytes(),
             value_type,
             seq_no,
         }
@@ -113,15 +195,15 @@ impl Entry {
 
     /// Create a new value entry.
     pub fn new_value(
-        key: impl Into<Key>,
-        value: impl Into<Value>,
+        key: impl IntoBytes,
+        value: impl IntoBytes,
         seq_no: SequenceNumber,
     ) -> Self {
         Self::new(key, value, ValueType::Value, seq_no)
     }
 
     /// Create a new tombstone (deletion) entry with empty value payload.
-    pub fn new_tombstone(key: impl Into<Key>, seq_no: SequenceNumber) -> Self {
+    pub fn new_tombstone(key: impl IntoBytes, seq_no: SequenceNumber) -> Self {
         Self::new(key, Bytes::new(), ValueType::Tombstone, seq_no)
     }
 
@@ -181,12 +263,12 @@ pub struct InternalKey {
 impl InternalKey {
     /// Create a new InternalKey.
     pub fn new(
-        user_key: impl Into<UserKey>,
+        user_key: impl IntoBytes,
         seq_no: SequenceNumber,
         value_type: ValueType,
     ) -> Self {
         Self {
-            user_key: user_key.into(),
+            user_key: user_key.into_bytes(),
             seq_no,
             value_type,
         }
