@@ -4,18 +4,25 @@ use crate::types::{Entry, Key, Value};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+/// Common interface for iterating across storage components (MemTables, SSTables, Merged Views).
 pub trait StorageIterator {
+    /// Returns `true` if the iterator is positioned at a valid entry.
     fn valid(&self) -> bool;
+    /// Advances the iterator to the next entry.
     fn next(&mut self) -> Result<()>;
+    /// Returns a reference to the current key.
     fn key(&self) -> &Key;
+    /// Returns a reference to the current value.
     fn value(&self) -> &Value;
 }
 
+/// An iterator yielding sorted entries from an in-memory SkipList [`MemTable`](crate::memtable::MemTable).
 pub struct MemtableIterator {
     iter: SkipListIter,
 }
 
 impl MemtableIterator {
+    /// Creates a new `MemtableIterator` wrapping an inner SkipList iterator.
     pub fn new(iter: SkipListIter) -> Self {
         Self { iter }
     }
@@ -44,12 +51,14 @@ impl StorageIterator for MemtableIterator {
     }
 }
 
+/// An iterator yielding sequential entries from an SSTable.
 pub struct SSTableIterator {
     entries: Vec<Entry>,
     index: usize,
 }
 
 impl SSTableIterator {
+    /// Creates a new `SSTableIterator` from a vector of entries.
     pub fn new(entries: Vec<Entry>) -> Self {
         Self { entries, index: 0 }
     }

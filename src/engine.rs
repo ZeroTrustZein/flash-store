@@ -16,10 +16,14 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+/// Real-time runtime statistics and internal memory metrics for FlashStore.
 #[derive(Debug, Clone)]
 pub struct Stats {
+    /// Approximate byte size of the active mutable MemTable.
     pub active_memtable_size: usize,
+    /// Number of immutable MemTables currently queued in memory for disk flushing.
     pub immutable_memtables_count: usize,
+    /// Number of active SSTable files per LSM level (index 0 corresponds to Level 0).
     pub levels_file_count: Vec<usize>,
 }
 
@@ -36,6 +40,26 @@ struct EngineInner {
     compact_lock: Mutex<()>,
 }
 
+/// The primary embedded LSM-tree key-value storage engine handle.
+///
+/// `FlashStore` is cheaply cloneable (internally wrapped in an `Arc`) and safe
+/// to share and invoke across multiple concurrent threads.
+///
+/// # Examples
+///
+/// ```rust
+/// use flash_store::prelude::*;
+///
+/// # fn main() -> Result<()> {
+/// # let dir = tempfile::tempdir().unwrap();
+/// let options = OptionsBuilder::new().dir(dir.path()).build();
+/// let db = FlashStore::open(options)?;
+///
+/// db.put("key1", "val1")?;
+/// assert_eq!(db.get("key1")?.unwrap(), "val1".as_bytes());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct FlashStore {
     inner: Arc<EngineInner>,

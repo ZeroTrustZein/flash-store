@@ -46,7 +46,11 @@
 - [Configuration Reference](#-configuration-reference)
 - [Code Examples](#-code-examples)
   - [Basic CRUD Lifecycle](#basic-crud-lifecycle)
+  - [Atomic Batch Operations](#atomic-batch-operations)
+  - [Range Queries & Prefix Scans](#range-queries--prefix-scans)
+  - [Crash Recovery & Durability](#crash-recovery--durability)
   - [Multi-Threaded Worker Pool](#multi-threaded-worker-pool)
+- [Deep Technical Documentation](#-deep-technical-documentation)
 - [Benchmarks & Performance](#-benchmarks--performance)
 - [Testing & Quality Assurance](#-testing--quality-assurance)
 - [License & Contributions](#-license--contributions)
@@ -757,6 +761,39 @@ Run with:
 ```bash
 cargo run --example multi_threaded
 ```
+
+### Atomic Batch Operations
+
+Demonstrates multi-key atomic transactions via `WriteBatch`:
+```bash
+cargo run --example batch_atomic
+```
+
+### Range Queries & Prefix Scans
+
+Demonstrates bounded scans, prefix queries, and multi-layer merging:
+```bash
+cargo run --example range_queries
+```
+
+### Crash Recovery & Durability
+
+Demonstrates persistent WAL replay, crash simulation, and SSTable recovery:
+```bash
+cargo run --example recovery_demo
+```
+
+---
+
+## 📚 Deep Technical Documentation
+
+Detailed architecture specifications, binary formats, and algorithms are available in the [`docs/`](docs/) directory:
+
+- 🏛 **[Architecture Guide](docs/ARCHITECTURE.md)**: High-level overview, subsystem components, read/write lifecycles, and concurrency lock hierarchy.
+- 💾 **[SSTable Binary Format Specification](docs/SSTABLE_FORMAT.md)**: Byte-level layout of Data Blocks, Bloom Filters, Meta Index, Index Blocks, and 48-byte Footers.
+- 📜 **[Write-Ahead Log (WAL) & Recovery Protocol](docs/WAL_RECOVERY.md)**: CRC32-IEEE framing, synchronous vs asynchronous durability, and crash recovery algorithm.
+- 🔄 **[Leveled Compaction Architecture](docs/COMPACTION.md)**: Dynamic level scoring, multi-way merge iterators, tombstone purging, and manifest updates.
+- ⚡ **[Performance, Benchmarking & Tuning](docs/BENCHMARKS.md)**: RUM trade-off matrix, configuration tuning guide, and Criterion benchmarking workflows.
 
 ---
 
