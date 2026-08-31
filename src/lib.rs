@@ -15,12 +15,12 @@ pub use batch::WriteBatch;
 pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
-pub use types::{Entry, Key, SequenceNumber, UserKey, Value, ValueType};
+pub use types::{Entry, InternalKey, Key, SequenceNumber, UserKey, Value, ValueType};
 
 pub mod prelude {
     pub use crate::batch::WriteBatch;
     pub use crate::config::{Options, OptionsBuilder};
     pub use crate::engine::FlashStore;
     pub use crate::error::{FlashStoreError, Result};
-    pub use crate::types::{Entry, Key, Value, ValueType};
+    pub use crate::types::{Entry, InternalKey, Key, Value, ValueType};
 }
