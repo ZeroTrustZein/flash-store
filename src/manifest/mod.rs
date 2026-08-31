@@ -145,3 +145,68 @@ impl VersionSet {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_manifest_log_and_read_edits() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("MANIFEST");
+
+        let manifest = Manifest::open(&manifest_path)?;
+
+        let mut edit1 = VersionEdit::new();
+        edit1.add_file(
+            0,
+            FileMetaData {
+                file_number: 1,
+                file_size: 1024,
+                smallest_key: Bytes::from_static(b"a"),
+                largest_key: Bytes::from_static(b"z"),
+            },
+        );
+        edit1.last_sequence = Some(10);
+        manifest.log_edit(&edit1)?;
+
+        let mut edit2 = VersionEdit::new();
+        edit2.delete_file(0, 1);
+        edit2.add_file(
+            1,
+            FileMetaData {
+                file_number: 2,
+                file_size: 2048,
+                smallest_key: Bytes::from_static(b"a"),
+                largest_key: Bytes::from_static(b"z"),
+            },
+        );
+        edit2.last_sequence = Some(20);
+        manifest.log_edit(&edit2)?;
+
+        let edits = Manifest::read_all_edits(&manifest_path)?;
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[0].new_files.len(), 1);
+        assert_eq!(edits[0].last_sequence, Some(10));
+        assert_eq!(edits[1].deleted_files.len(), 1);
+        assert_eq!(edits[1].new_files.len(), 1);
+        assert_eq!(edits[1].last_sequence, Some(20));
+
+        // Test VersionSet replay
+        let vs = VersionSet::new(7);
+        for edit in edits {
+            vs.log_and_apply(edit);
+        }
+
+        let ver = vs.current();
+        assert_eq!(ver.levels[0].len(), 0);
+        assert_eq!(ver.levels[1].len(), 1);
+        assert_eq!(ver.levels[1][0].file_number, 2);
+        assert_eq!(vs.last_sequence(), 20);
+        assert!(vs.next_file_number() > 2);
+
+        Ok(())
+    }
+}

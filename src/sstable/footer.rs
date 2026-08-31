@@ -68,3 +68,28 @@ impl Footer {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_footer_encode_decode() {
+        let footer = Footer::new(100, 50, 200, 80);
+        let encoded = footer.encode();
+        assert_eq!(encoded.len(), FOOTER_SIZE);
+
+        let decoded = Footer::decode(encoded).expect("decode footer");
+        assert_eq!(footer, decoded);
+    }
+
+    #[test]
+    fn test_footer_invalid_magic() {
+        let mut bad = Footer::new(100, 50, 200, 80).encode().to_vec();
+        let len = bad.len();
+        bad[len - 1] ^= 0xFF; // corrupt magic
+
+        let result = Footer::decode(Bytes::from(bad));
+        assert!(result.is_err());
+    }
+}

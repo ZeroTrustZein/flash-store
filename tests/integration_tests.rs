@@ -319,3 +319,74 @@ fn test_multi_version_overwrites() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_subsystems_compaction_pipeline() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .block_size(64)
+        .build();
+    let db = FlashStore::open(options)?;
+
+    // Create 4 L0 files
+    for batch_idx in 0..4 {
+        for item_idx in 0..10 {
+            let key = format!("k_{:02}_{:02}", batch_idx, item_idx);
+            let val = format!("val_{:02}_{:02}", batch_idx, item_idx);
+            db.put(key.into_bytes(), val.into_bytes())?;
+        }
+        db.flush()?;
+    }
+
+    let stats_before = db.stats();
+    assert_eq!(stats_before.levels_file_count[0], 4);
+    assert_eq!(stats_before.levels_file_count[1], 0);
+
+    // Compact L0 -> L1
+    db.compact()?;
+
+    let stats_after = db.stats();
+    assert_eq!(stats_after.levels_file_count[0], 0);
+    assert_eq!(stats_after.levels_file_count[1], 1);
+
+    // Verify all 40 keys are intact after compaction
+    for batch_idx in 0..4 {
+        for item_idx in 0..10 {
+            let key = format!("k_{:02}_{:02}", batch_idx, item_idx);
+            let expected = format!("val_{:02}_{:02}", batch_idx, item_idx);
+            assert_eq!(
+                db.get(key.into_bytes())?,
+                Some(bytes::Bytes::from(expected))
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_subsystems_merging_iterator_integration() -> Result<()> {
+    let e1 = Entry::new_value(bytes::Bytes::from_static(b"apple"), bytes::Bytes::from_static(b"10"), 1);
+    let e2 = Entry::new_value(bytes::Bytes::from_static(b"cherry"), bytes::Bytes::from_static(b"30"), 1);
+    let iter1 = SSTableIterator::new(vec![e1, e2]);
+
+    let e3 = Entry::new_value(bytes::Bytes::from_static(b"banana"), bytes::Bytes::from_static(b"20"), 2);
+    let e4 = Entry::new_value(bytes::Bytes::from_static(b"date"), bytes::Bytes::from_static(b"40"), 2);
+    let iter2 = SSTableIterator::new(vec![e3, e4]);
+
+    let mut merger = MergingIterator::new(vec![iter1, iter2]);
+    let mut collected = Vec::new();
+    while merger.valid() {
+        collected.push((merger.key().clone(), merger.value().clone()));
+        merger.next()?;
+    }
+
+    assert_eq!(collected.len(), 4);
+    assert_eq!(collected[0].0, bytes::Bytes::from_static(b"apple"));
+    assert_eq!(collected[1].0, bytes::Bytes::from_static(b"banana"));
+    assert_eq!(collected[2].0, bytes::Bytes::from_static(b"cherry"));
+    assert_eq!(collected[3].0, bytes::Bytes::from_static(b"date"));
+
+    Ok(())
+}

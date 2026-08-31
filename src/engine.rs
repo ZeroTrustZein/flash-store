@@ -1,4 +1,6 @@
 use crate::batch::{BatchOp, WriteBatch};
+use crate::cache::{BlockCache, LruBlockCache};
+use crate::compaction::Compactor;
 use crate::config::Options;
 use crate::error::Result;
 use crate::manifest::version::FileMetaData;
@@ -28,6 +30,7 @@ struct EngineInner {
     wal: RwLock<WalWriter>,
     manifest: Manifest,
     version_set: VersionSet,
+    block_cache: Arc<dyn BlockCache>,
     memtable_id_seq: AtomicUsize,
 }
 
@@ -80,6 +83,8 @@ impl FlashStore {
         version_set.set_last_sequence(max_seq);
 
         let wal = WalWriter::open(&wal_path, options.sync_wal)?;
+        let cache_capacity = (options.block_cache_size / options.block_size.max(1)).max(16);
+        let block_cache = Arc::new(LruBlockCache::new(cache_capacity));
 
         let inner = Arc::new(EngineInner {
             options,
@@ -88,6 +93,7 @@ impl FlashStore {
             wal: RwLock::new(wal),
             manifest,
             version_set,
+            block_cache,
             memtable_id_seq: AtomicUsize::new(1),
         });
 
@@ -142,7 +148,11 @@ impl FlashStore {
                     .dir
                     .join(format!("{:06}.sst", file_meta.file_number));
                 if file_path.exists() {
-                    let mut reader = TableReader::open(&file_path)?;
+                    let mut reader = TableReader::open_with_cache(
+                        &file_path,
+                        file_meta.file_number,
+                        Some(self.inner.block_cache.clone()),
+                    )?;
                     if let Some(res) = reader.get(&key)? {
                         return Ok(res);
                     }
@@ -162,7 +172,11 @@ impl FlashStore {
                     .dir
                     .join(format!("{:06}.sst", file_meta.file_number));
                 if file_path.exists() {
-                    let mut reader = TableReader::open(&file_path)?;
+                    let mut reader = TableReader::open_with_cache(
+                        &file_path,
+                        file_meta.file_number,
+                        Some(self.inner.block_cache.clone()),
+                    )?;
                     if let Some(res) = reader.get(&key)? {
                         return Ok(res);
                     }
@@ -305,6 +319,42 @@ impl FlashStore {
     }
 
     pub fn compact(&self) -> Result<()> {
+        let compactor = Compactor::new(
+            self.inner.options.max_levels,
+            self.inner.options.base_level_size_bytes,
+        );
+
+        // Run compaction passes as long as pick_compaction returns a task
+        for _ in 0..100 {
+            let version = self.inner.version_set.current();
+            let task = match compactor.pick_compaction(&version.levels) {
+                Some(t) => t,
+                None => break,
+            };
+
+            let edit = compactor.run_compaction(
+                &task,
+                &self.inner.options.dir,
+                &self.inner.options,
+                || self.inner.version_set.next_file_number(),
+            )?;
+
+            self.inner.manifest.log_edit(&edit)?;
+            self.inner.version_set.log_and_apply(edit.clone());
+
+            // Remove obsolete SSTable files from disk
+            for (_, file_number) in edit.deleted_files {
+                let path = self
+                    .inner
+                    .options
+                    .dir
+                    .join(format!("{:06}.sst", file_number));
+                if path.exists() {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -331,7 +381,11 @@ impl FlashStore {
                     .dir
                     .join(format!("{:06}.sst", file_meta.file_number));
                 if file_path.exists() {
-                    let mut reader = TableReader::open(&file_path)?;
+                    let mut reader = TableReader::open_with_cache(
+                        &file_path,
+                        file_meta.file_number,
+                        Some(self.inner.block_cache.clone()),
+                    )?;
                     let entries = reader.read_all_entries()?;
                     for entry in entries {
                         update_entry(entry);
@@ -406,6 +460,124 @@ impl FlashStore {
         if size >= self.inner.options.memtable_size {
             self.flush()?;
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::OptionsBuilder;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_engine_empty_flush() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new().dir(dir.path()).build();
+        let db = FlashStore::open(options)?;
+
+        // Flushing empty memtable should succeed as a no-op
+        db.flush()?;
+        let stats = db.stats();
+        assert_eq!(stats.levels_file_count[0], 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_engine_delete_non_existent() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new().dir(dir.path()).build();
+        let db = FlashStore::open(options)?;
+
+        db.delete(b"non_existent")?;
+        assert_eq!(db.get(b"non_existent")?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_engine_multiple_flushes_and_scan() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new().dir(dir.path()).build();
+        let db = FlashStore::open(options)?;
+
+        db.put(b"k1", b"v1")?;
+        db.flush()?;
+
+        db.put(b"k2", b"v2")?;
+        db.flush()?;
+
+        db.put(b"k3", b"v3")?;
+        db.flush()?;
+
+        let stats = db.stats();
+        assert_eq!(stats.levels_file_count[0], 3);
+
+        let entries = db.scan(None, None)?;
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].0, bytes::Bytes::from_static(b"k1"));
+        assert_eq!(entries[1].0, bytes::Bytes::from_static(b"k2"));
+        assert_eq!(entries[2].0, bytes::Bytes::from_static(b"k3"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_engine_compaction_and_data_integrity() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new()
+            .dir(dir.path())
+            .block_size(64)
+            .build();
+        let db = FlashStore::open(options)?;
+
+        // Produce 4 SSTables in L0
+        for i in 1..=4 {
+            db.put(format!("key_{}", i), format!("val_{}", i))?;
+            db.flush()?;
+        }
+
+        let stats_before = db.stats();
+        assert_eq!(stats_before.levels_file_count[0], 4);
+
+        // Run compaction: L0 files should be compacted into L1
+        db.compact()?;
+
+        let stats_after = db.stats();
+        assert_eq!(stats_after.levels_file_count[0], 0);
+        assert_eq!(stats_after.levels_file_count[1], 1);
+
+        // Verify all keys remain accessible
+        for i in 1..=4 {
+            let val = db.get(format!("key_{}", i))?;
+            assert_eq!(val, Some(bytes::Bytes::from(format!("val_{}", i))));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_engine_wal_recovery_and_persistence() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new().dir(dir.path()).build();
+
+        {
+            let db = FlashStore::open(options.clone())?;
+            db.put(b"persist_k1", b"persist_v1")?;
+            db.put(b"persist_k2", b"persist_v2")?;
+            db.delete(b"persist_k1")?;
+            db.close()?;
+        }
+
+        // Reopen from same directory
+        let db_recovered = FlashStore::open(options)?;
+        assert_eq!(db_recovered.get(b"persist_k1")?, None);
+        assert_eq!(
+            db_recovered.get(b"persist_k2")?,
+            Some(bytes::Bytes::from_static(b"persist_v2"))
+        );
+
         Ok(())
     }
 }

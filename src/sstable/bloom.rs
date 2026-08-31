@@ -66,3 +66,36 @@ impl BloomFilter {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bloom_filter_basic() {
+        let bloom = BloomFilter::new(10);
+        let keys = vec![
+            Bytes::from_static(b"apple"),
+            Bytes::from_static(b"banana"),
+            Bytes::from_static(b"cherry"),
+        ];
+
+        let filter = bloom.build_from_keys(&keys);
+
+        // Positive checks (must be true)
+        assert!(BloomFilter::may_contain(&filter, b"apple"));
+        assert!(BloomFilter::may_contain(&filter, b"banana"));
+        assert!(BloomFilter::may_contain(&filter, b"cherry"));
+
+        // Negative check (likely false for non-member)
+        let _ = BloomFilter::may_contain(&filter, b"durian");
+    }
+
+    #[test]
+    fn test_bloom_filter_empty() {
+        let bloom = BloomFilter::new(10);
+        let filter = bloom.build_from_keys(&[]);
+        assert_eq!(filter.len(), 0);
+        assert!(BloomFilter::may_contain(&filter, b"any_key"));
+    }
+}

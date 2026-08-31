@@ -111,3 +111,59 @@ impl WalReader {
         Ok(records)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_wal_write_and_read_all() -> Result<()> {
+        let dir = tempdir().unwrap();
+        let wal_path = dir.path().join("test.wal");
+
+        let writer = WalWriter::open(&wal_path, true)?;
+        assert_eq!(writer.path(), wal_path);
+
+        let r1 = WalRecord {
+            key: bytes::Bytes::from_static(b"k1"),
+            value: bytes::Bytes::from_static(b"v1"),
+            is_delete: false,
+            seq_no: 1,
+        };
+        let r2 = WalRecord {
+            key: bytes::Bytes::from_static(b"k2"),
+            value: bytes::Bytes::from_static(b"v2"),
+            is_delete: false,
+            seq_no: 2,
+        };
+        let r3 = WalRecord {
+            key: bytes::Bytes::from_static(b"k1"),
+            value: bytes::Bytes::new(),
+            is_delete: true,
+            seq_no: 3,
+        };
+
+        writer.append(&r1)?;
+        writer.append_batch(&[r2.clone(), r3.clone()])?;
+
+        let mut reader = WalReader::open(&wal_path)?;
+        let records = reader.read_all()?;
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].key, r1.key);
+        assert_eq!(records[0].seq_no, 1);
+        assert_eq!(records[1].key, r2.key);
+        assert_eq!(records[1].seq_no, 2);
+        assert_eq!(records[2].key, r3.key);
+        assert_eq!(records[2].is_delete, true);
+        assert_eq!(records[2].seq_no, 3);
+
+        // Reset WAL and verify empty
+        writer.reset()?;
+        let mut reader_after_reset = WalReader::open(&wal_path)?;
+        let records_after_reset = reader_after_reset.read_all()?;
+        assert_eq!(records_after_reset.len(), 0);
+
+        Ok(())
+    }
+}

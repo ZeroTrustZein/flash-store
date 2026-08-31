@@ -173,3 +173,54 @@ impl<I: StorageIterator> StorageIterator for MergingIterator<I> {
         &self.current.as_ref().expect("iterator not valid").1
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sstable_iterator() {
+        let entries = vec![
+            Entry::new_value(Bytes::from_static(b"k1"), Bytes::from_static(b"v1"), 1),
+            Entry::new_value(Bytes::from_static(b"k2"), Bytes::from_static(b"v2"), 2),
+        ];
+
+        let mut iter = SSTableIterator::new(entries);
+        assert!(iter.valid());
+        assert_eq!(iter.key(), &Bytes::from_static(b"k1"));
+        assert_eq!(iter.value(), &Bytes::from_static(b"v1"));
+
+        iter.next().unwrap();
+        assert!(iter.valid());
+        assert_eq!(iter.key(), &Bytes::from_static(b"k2"));
+
+        iter.next().unwrap();
+        assert!(!iter.valid());
+    }
+
+    #[test]
+    fn test_merging_iterator_dedup() {
+        let iter1 = SSTableIterator::new(vec![
+            Entry::new_value(Bytes::from_static(b"a"), Bytes::from_static(b"v_a_1"), 1),
+            Entry::new_value(Bytes::from_static(b"c"), Bytes::from_static(b"v_c_1"), 1),
+        ]);
+
+        let iter2 = SSTableIterator::new(vec![
+            Entry::new_value(Bytes::from_static(b"a"), Bytes::from_static(b"v_a_2"), 2),
+            Entry::new_value(Bytes::from_static(b"b"), Bytes::from_static(b"v_b_2"), 2),
+        ]);
+
+        let mut merger = MergingIterator::new(vec![iter1, iter2]);
+
+        let mut results = Vec::new();
+        while merger.valid() {
+            results.push((merger.key().clone(), merger.value().clone()));
+            merger.next().unwrap();
+        }
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, Bytes::from_static(b"a"));
+        assert_eq!(results[1].0, Bytes::from_static(b"b"));
+        assert_eq!(results[2].0, Bytes::from_static(b"c"));
+    }
+}

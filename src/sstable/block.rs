@@ -66,3 +66,26 @@ impl Block {
         self.offsets.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_encode_decode() {
+        let entries = vec![
+            Entry::new_value(Bytes::from_static(b"k1"), Bytes::from_static(b"v1"), 1),
+            Entry::new_value(Bytes::from_static(b"k2"), Bytes::from_static(b"v2"), 2),
+            Entry::new_tombstone(Bytes::from_static(b"k3"), 3),
+        ];
+
+        let encoded = Block::encode(&entries);
+        let block = Block::decode(encoded).expect("decode block");
+        assert_eq!(block.entries_len(), 3);
+
+        assert_eq!(block.get_entry(0), Some(entries[0].clone()));
+        assert_eq!(block.get_entry(1), Some(entries[1].clone()));
+        assert_eq!(block.get_entry(2), Some(entries[2].clone()));
+        assert_eq!(block.get_entry(3), None);
+    }
+}
