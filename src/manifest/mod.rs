@@ -16,11 +16,7 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             file: Mutex::new(file),
             path: path.as_ref().to_path_buf(),
@@ -54,7 +50,11 @@ impl Manifest {
         let mut edits = Vec::new();
         let mut offset = 0;
         while offset + 4 <= buffer.len() {
-            let len = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap()) as usize;
+            let len_bytes: [u8; 4] = match buffer[offset..offset + 4].try_into() {
+                Ok(b) => b,
+                Err(_) => break,
+            };
+            let len = u32::from_le_bytes(len_bytes) as usize;
             offset += 4;
             if offset + len > buffer.len() {
                 break;
@@ -128,7 +128,8 @@ impl VersionSet {
     }
 
     pub fn log_and_apply(&self, edit: VersionEdit) {
-        let mut current_levels = self.current.read().levels.clone();
+        let mut current_guard = self.current.write();
+        let mut current_levels = current_guard.levels.clone();
 
         for (level, file_number) in edit.deleted_files {
             if level < current_levels.len() {
@@ -140,9 +141,13 @@ impl VersionSet {
             if level < current_levels.len() {
                 let current_next = self.next_file_number.load(Ordering::SeqCst);
                 if meta.file_number >= current_next {
-                    self.next_file_number.store(meta.file_number + 1, Ordering::SeqCst);
+                    self.next_file_number
+                        .store(meta.file_number + 1, Ordering::SeqCst);
                 }
                 current_levels[level].push(meta);
+                if level > 0 {
+                    current_levels[level].sort_by(|a, b| a.smallest_key.cmp(&b.smallest_key));
+                }
             }
         }
 
@@ -159,7 +164,7 @@ impl VersionSet {
             }
         }
 
-        *self.current.write() = Arc::new(Version {
+        *current_guard = Arc::new(Version {
             levels: current_levels,
         });
     }

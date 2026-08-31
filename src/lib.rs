@@ -58,7 +58,12 @@ pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
-pub use types::{Entry, InternalKey, IntoBytes, Key, SequenceNumber, UserKey, Value, ValueType};
+pub use sstable::{table_file_name, table_path};
+pub use types::{
+    ChecksumType, CompressionType, DefaultUserKeyComparator, Entry, InternalKey, IntoBytes, Key,
+    KeyRange, SequenceNumber, UserKey, UserKeyComparator, Value, ValueType, MAX_SEQUENCE_NUMBER,
+    MIN_SEQUENCE_NUMBER,
+};
 
 pub mod prelude {
     pub use crate::batch::WriteBatch;
@@ -68,6 +73,13 @@ pub mod prelude {
     pub use crate::config::{Options, OptionsBuilder};
     pub use crate::engine::{FlashStore, Stats};
     pub use crate::error::{FlashStoreError, Result};
-    pub use crate::iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
-    pub use crate::types::{Entry, InternalKey, IntoBytes, Key, Value, ValueType};
+    pub use crate::iterator::{
+        MemtableIterator, MergingIterator, SSTableIterator, StorageIterator,
+    };
+    pub use crate::sstable::{table_file_name, table_path};
+    pub use crate::types::{
+        ChecksumType, CompressionType, DefaultUserKeyComparator, Entry, InternalKey, IntoBytes,
+        Key, KeyRange, SequenceNumber, UserKey, UserKeyComparator, Value, ValueType,
+        MAX_SEQUENCE_NUMBER, MIN_SEQUENCE_NUMBER,
+    };
 }

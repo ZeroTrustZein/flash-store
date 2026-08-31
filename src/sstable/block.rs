@@ -30,11 +30,16 @@ impl Block {
 
     pub fn decode(data: Bytes) -> crate::error::Result<Self> {
         if data.len() < 4 {
-            return Err(crate::error::FlashStoreError::Corruption("block too short".into()));
+            return Err(crate::error::FlashStoreError::Corruption(
+                "block too short".into(),
+            ));
         }
 
         let len = data.len();
-        let num_offsets = u32::from_le_bytes(data[len - 4..len].try_into().unwrap()) as usize;
+        let num_offsets_bytes: [u8; 4] = data[len - 4..len].try_into().map_err(|_| {
+            crate::error::FlashStoreError::Corruption("corrupted offsets length".into())
+        })?;
+        let num_offsets = u32::from_le_bytes(num_offsets_bytes) as usize;
         let total_offsets_bytes = num_offsets.checked_mul(4).ok_or_else(|| {
             crate::error::FlashStoreError::Corruption("corrupted offsets count".into())
         })?;
@@ -83,6 +88,35 @@ impl Block {
     pub fn entries_len(&self) -> usize {
         self.offsets.len()
     }
+
+    /// Binary search entries in the block for the first matching user key.
+    pub fn get_by_key(&self, key: &[u8]) -> Option<Entry> {
+        let mut low = 0;
+        let mut high = self.offsets.len();
+
+        // Lower bound binary search on sorted entries
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if let Some(entry) = self.get_entry(mid) {
+                if entry.key.as_ref() < key {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if low < self.offsets.len() {
+            if let Some(entry) = self.get_entry(low) {
+                if entry.key.as_ref() == key {
+                    return Some(entry);
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -105,5 +139,12 @@ mod tests {
         assert_eq!(block.get_entry(1), Some(entries[1].clone()));
         assert_eq!(block.get_entry(2), Some(entries[2].clone()));
         assert_eq!(block.get_entry(3), None);
+
+        // Binary search lookup
+        assert_eq!(block.get_by_key(b"k1"), Some(entries[0].clone()));
+        assert_eq!(block.get_by_key(b"k2"), Some(entries[1].clone()));
+        assert_eq!(block.get_by_key(b"k3"), Some(entries[2].clone()));
+        assert_eq!(block.get_by_key(b"k0"), None);
+        assert_eq!(block.get_by_key(b"k4"), None);
     }
 }

@@ -3,25 +3,20 @@ pub mod formatter;
 pub mod inspect;
 pub mod repl;
 
-use crate::error::Result;
-use crate::engine::FlashStore;
 use crate::config::OptionsBuilder;
+use crate::engine::FlashStore;
+use crate::error::Result;
 use bytes::Bytes;
 use clap::Subcommand;
 use std::path::PathBuf;
 
 /// Output format for commands that emit rows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum OutputFormat {
+    #[default]
     Text,
     Json,
     Tsv,
-}
-
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::Text
-    }
 }
 
 /// Global CLI options (shared by all subcommands via the binary).
@@ -64,10 +59,7 @@ impl GlobalOpts {
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
     /// Insert a key-value pair.
-    Put {
-        key: String,
-        value: String,
-    },
+    Put { key: String, value: String },
     /// Query a key.
     Get {
         key: String,
@@ -75,9 +67,7 @@ pub enum Cmd {
         format: OutputFormat,
     },
     /// Delete a key.
-    Delete {
-        key: String,
-    },
+    Delete { key: String },
     /// Range scan.
     Scan {
         /// Start key (inclusive).
@@ -166,16 +156,24 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         }
         Cmd::Get { key, format } => {
             let db = open_db(opts)?;
-            let fmt = if opts.json { OutputFormat::Json } else { format };
+            let fmt = if opts.json {
+                OutputFormat::Json
+            } else {
+                format
+            };
             match db.get(Bytes::from(key.clone()))? {
                 Some(val) => {
                     let s = String::from_utf8_lossy(&val).into_owned();
                     match fmt {
                         OutputFormat::Json => {
-                            println!("{}", serde_json::to_string(&serde_json::json!({
-                                "key": key,
-                                "value": s,
-                            })).unwrap());
+                            println!(
+                                "{}",
+                                serde_json::to_string(&serde_json::json!({
+                                    "key": key,
+                                    "value": s,
+                                }))
+                                .unwrap()
+                            );
                         }
                         OutputFormat::Tsv => println!("{}\t{}", key, s),
                         OutputFormat::Text => println!("{}", s),
@@ -183,10 +181,14 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
                 }
                 None => {
                     if fmt == OutputFormat::Json {
-                        println!("{}", serde_json::to_string(&serde_json::json!({
-                            "key": key,
-                            "value": null,
-                        })).unwrap());
+                        println!(
+                            "{}",
+                            serde_json::to_string(&serde_json::json!({
+                                "key": key,
+                                "value": null,
+                            }))
+                            .unwrap()
+                        );
                     } else {
                         println!("(nil)");
                     }
@@ -200,9 +202,19 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
                 println!("OK");
             }
         }
-        Cmd::Scan { start, end, limit, reverse, format } => {
+        Cmd::Scan {
+            start,
+            end,
+            limit,
+            reverse,
+            format,
+        } => {
             let db = open_db(opts)?;
-            let fmt = if opts.json { OutputFormat::Json } else { format };
+            let fmt = if opts.json {
+                OutputFormat::Json
+            } else {
+                format
+            };
             let start_key = start.map(Bytes::from);
             let end_key = end.map(Bytes::from);
             let mut results = db.scan(start_key, end_key)?;
@@ -250,21 +262,33 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         }
         Cmd::Stats { format } => {
             let db = open_db(opts)?;
-            let fmt = if opts.json { OutputFormat::Json } else { format };
+            let fmt = if opts.json {
+                OutputFormat::Json
+            } else {
+                format
+            };
             let stats = db.stats();
             formatter::format_stats(&stats, fmt);
         }
         Cmd::Inspect { path, format } => {
-            let fmt = if opts.json { OutputFormat::Json } else { format };
+            let fmt = if opts.json {
+                OutputFormat::Json
+            } else {
+                format
+            };
             // Resolve path: if it looks like a number, look for it in opts.path dir
             let sst_path = if let Ok(num) = path.parse::<u64>() {
-                opts.path.join(format!("{:06}.sst", num))
+                crate::sstable::table_path(&opts.path, num)
             } else {
                 PathBuf::from(&path)
             };
             inspect::inspect_sst(&sst_path, fmt)?;
         }
-        Cmd::Bench { ops, value_size, read_ratio } => {
+        Cmd::Bench {
+            ops,
+            value_size,
+            read_ratio,
+        } => {
             let db = open_db(opts)?;
             run_bench(&db, ops, value_size, read_ratio, opts.quiet)?;
         }
@@ -276,7 +300,13 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
     Ok(())
 }
 
-fn run_bench(db: &FlashStore, ops: usize, value_size: usize, read_ratio: f64, quiet: bool) -> Result<()> {
+fn run_bench(
+    db: &FlashStore,
+    ops: usize,
+    value_size: usize,
+    read_ratio: f64,
+    quiet: bool,
+) -> Result<()> {
     use std::time::Instant;
 
     if ops == 0 {
@@ -291,7 +321,7 @@ fn run_bench(db: &FlashStore, ops: usize, value_size: usize, read_ratio: f64, qu
     let writes = ops - reads;
 
     // Seed some data first
-    let seed = writes.min(1000).max(1);
+    let seed = writes.clamp(1, 1000);
     for i in 0..seed {
         let k = Bytes::from(format!("bench_key_{:08}", i));
         db.put(k, value.clone())?;

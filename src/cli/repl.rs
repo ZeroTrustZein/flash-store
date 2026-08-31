@@ -80,9 +80,7 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
         }
         "GET" => {
             if args.is_empty() {
-                return Err(FlashStoreError::InvalidArgument(
-                    "Usage: GET <key>".into(),
-                ));
+                return Err(FlashStoreError::InvalidArgument("Usage: GET <key>".into()));
             }
             let key = &args[0];
             let res = db.get(Bytes::from(key.clone()))?;
@@ -97,9 +95,7 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
         }
         "DEL" | "DELETE" => {
             if args.is_empty() {
-                return Err(FlashStoreError::InvalidArgument(
-                    "Usage: DEL <key>".into(),
-                ));
+                return Err(FlashStoreError::InvalidArgument("Usage: DEL <key>".into()));
             }
             let key = &args[0];
             db.delete(Bytes::from(key.clone()))?;
@@ -146,8 +142,14 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
         "STATS" => {
             let stats = db.stats();
             let mut out = String::new();
-            out.push_str(&format!("Active memtable: {} bytes\n", stats.active_memtable_size));
-            out.push_str(&format!("Immutable memtables: {}\n", stats.immutable_memtables_count));
+            out.push_str(&format!(
+                "Active memtable: {} bytes\n",
+                stats.active_memtable_size
+            ));
+            out.push_str(&format!(
+                "Immutable memtables: {}\n",
+                stats.immutable_memtables_count
+            ));
             for (lvl, count) in stats.levels_file_count.iter().enumerate() {
                 out.push_str(&format!("Level {}: {} SSTables\n", lvl, count));
             }
@@ -173,15 +175,11 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
             let _ = io::stdout().flush();
             Ok(None)
         }
-        "EXIT" | "QUIT" | "Q" => {
-            Ok(Some("BYE".to_string()))
-        }
-        other => {
-            Err(FlashStoreError::InvalidArgument(format!(
-                "Unknown command '{}'. Type 'HELP' for commands.",
-                other
-            )))
-        }
+        "EXIT" | "QUIT" | "Q" => Ok(Some("BYE".to_string())),
+        other => Err(FlashStoreError::InvalidArgument(format!(
+            "Unknown command '{}'. Type 'HELP' for commands.",
+            other
+        ))),
     }
 }
 
@@ -204,7 +202,9 @@ pub fn run_repl(db: FlashStore, opts: &GlobalOpts) -> Result<()> {
         io::stdout().flush().map_err(FlashStoreError::Io)?;
 
         line_buffer.clear();
-        let bytes_read = reader.read_line(&mut line_buffer).map_err(FlashStoreError::Io)?;
+        let bytes_read = reader
+            .read_line(&mut line_buffer)
+            .map_err(FlashStoreError::Io)?;
         if bytes_read == 0 {
             // EOF reached
             println!("\nGoodbye.");
@@ -217,21 +217,19 @@ pub fn run_repl(db: FlashStore, opts: &GlobalOpts) -> Result<()> {
         }
 
         match tokenize_line(trimmed) {
-            Ok(tokens) => {
-                match execute_repl_command(&db, &tokens) {
-                    Ok(Some(output)) => {
-                        if output == "BYE" {
-                            println!("Goodbye.");
-                            break;
-                        }
-                        println!("{}", output);
+            Ok(tokens) => match execute_repl_command(&db, &tokens) {
+                Ok(Some(output)) => {
+                    if output == "BYE" {
+                        println!("Goodbye.");
+                        break;
                     }
-                    Ok(None) => {}
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                    }
+                    println!("{}", output);
                 }
-            }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                }
+            },
             Err(e) => {
                 eprintln!("Parse error: {}", e);
             }

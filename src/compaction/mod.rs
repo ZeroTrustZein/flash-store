@@ -1,7 +1,7 @@
 use crate::config::Options;
 use crate::error::Result;
 use crate::manifest::version::{FileMetaData, VersionEdit};
-use crate::sstable::{TableBuilder, TableReader};
+use crate::sstable::{table_path, TableBuilder, TableReader};
 use crate::types::{Entry, Key, ValueType};
 use bytes::Bytes;
 use std::collections::BTreeMap;
@@ -39,12 +39,7 @@ impl Compactor {
 
     /// Check if two key ranges [min1, max1] and [min2, max2] overlap.
     #[inline]
-    pub fn ranges_overlap(
-        min1: &Bytes,
-        max1: &Bytes,
-        min2: &Bytes,
-        max2: &Bytes,
-    ) -> bool {
+    pub fn ranges_overlap(min1: &Bytes, max1: &Bytes, min2: &Bytes, max2: &Bytes) -> bool {
         !(max1 < min2 || max2 < min1)
     }
 
@@ -68,15 +63,15 @@ impl Compactor {
         }
 
         // 1. Check Level 0 file count trigger
-        if let Some(l0) = levels.get(0) {
+        if let Some(l0) = levels.first() {
             if l0.len() >= self.l0_compaction_trigger {
                 let mut min_key = &l0[0].smallest_key;
                 let mut max_key = &l0[0].largest_key;
                 for f in l0.iter().skip(1) {
-                    if &f.smallest_key < min_key {
+                    if f.smallest_key < *min_key {
                         min_key = &f.smallest_key;
                     }
-                    if &f.largest_key > max_key {
+                    if f.largest_key > *max_key {
                         max_key = &f.largest_key;
                     }
                 }
@@ -107,7 +102,8 @@ impl Compactor {
             }
 
             let level_size: u64 = files.iter().map(|f| f.file_size).sum();
-            let limit = (self.base_level_size_bytes * (10_usize.pow((level_idx - 1) as u32))) as u64;
+            let limit =
+                (self.base_level_size_bytes * (10_usize.pow((level_idx - 1) as u32))) as u64;
 
             if level_size > limit {
                 let chosen_file = files[0].clone();
@@ -149,10 +145,10 @@ impl Compactor {
         // 1. Gather all entries from all source and target input files
         let mut all_files = Vec::new();
         for f in &task.input_files {
-            all_files.push(dir.join(format!("{:06}.sst", f.file_number)));
+            all_files.push(table_path(dir, f.file_number));
         }
         for f in &task.target_input_files {
-            all_files.push(dir.join(format!("{:06}.sst", f.file_number)));
+            all_files.push(table_path(dir, f.file_number));
         }
 
         // Map key -> (highest seq_no, Entry)
@@ -201,7 +197,7 @@ impl Compactor {
         // Write new SSTable(s) if there are surviving entries
         if !final_entries.is_empty() {
             let file_num = next_file_number();
-            let sst_path = dir.join(format!("{:06}.sst", file_num));
+            let sst_path = table_path(dir, file_num);
             let mut builder = TableBuilder::new(&sst_path, options.clone())?;
 
             let smallest_key = final_entries.first().unwrap().key.clone();
@@ -273,17 +269,33 @@ mod tests {
         let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
 
         // Create L0 SSTable with key "k1" (seq 1, value "v1_old") and "k2" (seq 2, value "v2")
-        let sst1_path = dir.path().join("000001.sst");
+        let sst1_path = table_path(dir.path(), 1);
         let mut b1 = TableBuilder::new(&sst1_path, options.clone())?;
-        b1.add(Entry::new_value(Bytes::from_static(b"k1"), Bytes::from_static(b"v1_old"), 1))?;
-        b1.add(Entry::new_value(Bytes::from_static(b"k2"), Bytes::from_static(b"v2"), 2))?;
+        b1.add(Entry::new_value(
+            Bytes::from_static(b"k1"),
+            Bytes::from_static(b"v1_old"),
+            1,
+        ))?;
+        b1.add(Entry::new_value(
+            Bytes::from_static(b"k2"),
+            Bytes::from_static(b"v2"),
+            2,
+        ))?;
         let size1 = b1.finish()?;
 
         // Create L1 SSTable with key "k1" (seq 5, value "v1_new") and "k3" (seq 3, value "v3")
-        let sst2_path = dir.path().join("000002.sst");
+        let sst2_path = table_path(dir.path(), 2);
         let mut b2 = TableBuilder::new(&sst2_path, options.clone())?;
-        b2.add(Entry::new_value(Bytes::from_static(b"k1"), Bytes::from_static(b"v1_new"), 5))?;
-        b2.add(Entry::new_value(Bytes::from_static(b"k3"), Bytes::from_static(b"v3"), 3))?;
+        b2.add(Entry::new_value(
+            Bytes::from_static(b"k1"),
+            Bytes::from_static(b"v1_new"),
+            5,
+        ))?;
+        b2.add(Entry::new_value(
+            Bytes::from_static(b"k3"),
+            Bytes::from_static(b"v3"),
+            3,
+        ))?;
         let size2 = b2.finish()?;
 
         let task = CompactionTask {
@@ -317,7 +329,7 @@ mod tests {
         assert_eq!(edit.new_files[0].1.file_number, 10);
 
         // Verify output SSTable contents
-        let out_path = dir.path().join("000010.sst");
+        let out_path = table_path(dir.path(), 10);
         let mut reader = TableReader::open(&out_path)?;
         let entries = reader.read_all_entries()?;
         assert_eq!(entries.len(), 3);
@@ -337,7 +349,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
 
-        let sst1_path = dir.path().join("000001.sst");
+        let sst1_path = table_path(dir.path(), 1);
         let mut b1 = TableBuilder::new(&sst1_path, options.clone())?;
         b1.add(Entry::new_tombstone(Bytes::from_static(b"dead_key"), 10))?;
         let size1 = b1.finish()?;

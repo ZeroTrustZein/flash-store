@@ -20,7 +20,10 @@ fn test_basic_crud() -> Result<()> {
 
     // Overwrite
     db.put(b"k1", b"v1_updated")?;
-    assert_eq!(db.get(b"k1")?, Some(bytes::Bytes::from_static(b"v1_updated")));
+    assert_eq!(
+        db.get(b"k1")?,
+        Some(bytes::Bytes::from_static(b"v1_updated"))
+    );
 
     // Delete
     db.delete(b"k1")?;
@@ -98,8 +101,14 @@ fn test_crash_recovery_wal() -> Result<()> {
         let db = FlashStore::open(options)?;
 
         assert_eq!(db.get(b"wal_k1")?, None);
-        assert_eq!(db.get(b"wal_k2")?, Some(bytes::Bytes::from_static(b"wal_v2")));
-        assert_eq!(db.get(b"wal_k3")?, Some(bytes::Bytes::from_static(b"wal_v3")));
+        assert_eq!(
+            db.get(b"wal_k2")?,
+            Some(bytes::Bytes::from_static(b"wal_v2"))
+        );
+        assert_eq!(
+            db.get(b"wal_k3")?,
+            Some(bytes::Bytes::from_static(b"wal_v3"))
+        );
     }
 
     Ok(())
@@ -125,8 +134,14 @@ fn test_crash_recovery_manifest_and_sst() -> Result<()> {
         let options = OptionsBuilder::new().dir(&db_path).build();
         let db = FlashStore::open(options)?;
 
-        assert_eq!(db.get(b"sst_k1")?, Some(bytes::Bytes::from_static(b"sst_v1")));
-        assert_eq!(db.get(b"sst_k2")?, Some(bytes::Bytes::from_static(b"sst_v2")));
+        assert_eq!(
+            db.get(b"sst_k1")?,
+            Some(bytes::Bytes::from_static(b"sst_v1"))
+        );
+        assert_eq!(
+            db.get(b"sst_k2")?,
+            Some(bytes::Bytes::from_static(b"sst_v2"))
+        );
         assert_eq!(db.get(b"sst_k3")?, None);
 
         let stats = db.stats();
@@ -150,8 +165,8 @@ fn test_crash_recovery_mixed_wal_and_sst() -> Result<()> {
         db.flush()?; // Flushed to SSTable
 
         db.put(b"k1", b"v1_new")?; // Unflushed in WAL
-        db.delete(b"k2")?;         // Unflushed delete in WAL
-        db.put(b"k3", b"v3")?;     // Unflushed in WAL
+        db.delete(b"k2")?; // Unflushed delete in WAL
+        db.put(b"k3", b"v3")?; // Unflushed in WAL
         db.close()?;
     }
 
@@ -219,10 +234,22 @@ fn test_range_scan() -> Result<()> {
     assert_eq!(
         all,
         vec![
-            (bytes::Bytes::from_static(b"a"), bytes::Bytes::from_static(b"1")),
-            (bytes::Bytes::from_static(b"c"), bytes::Bytes::from_static(b"3")),
-            (bytes::Bytes::from_static(b"d"), bytes::Bytes::from_static(b"4")),
-            (bytes::Bytes::from_static(b"e"), bytes::Bytes::from_static(b"5")),
+            (
+                bytes::Bytes::from_static(b"a"),
+                bytes::Bytes::from_static(b"1")
+            ),
+            (
+                bytes::Bytes::from_static(b"c"),
+                bytes::Bytes::from_static(b"3")
+            ),
+            (
+                bytes::Bytes::from_static(b"d"),
+                bytes::Bytes::from_static(b"4")
+            ),
+            (
+                bytes::Bytes::from_static(b"e"),
+                bytes::Bytes::from_static(b"5")
+            ),
         ]
     );
 
@@ -234,8 +261,14 @@ fn test_range_scan() -> Result<()> {
     assert_eq!(
         bounded,
         vec![
-            (bytes::Bytes::from_static(b"c"), bytes::Bytes::from_static(b"3")),
-            (bytes::Bytes::from_static(b"d"), bytes::Bytes::from_static(b"4")),
+            (
+                bytes::Bytes::from_static(b"c"),
+                bytes::Bytes::from_static(b"3")
+            ),
+            (
+                bytes::Bytes::from_static(b"d"),
+                bytes::Bytes::from_static(b"4")
+            ),
         ]
     );
 
@@ -323,10 +356,7 @@ fn test_multi_version_overwrites() -> Result<()> {
 #[test]
 fn test_subsystems_compaction_pipeline() -> Result<()> {
     let dir = tempdir().unwrap();
-    let options = OptionsBuilder::new()
-        .dir(dir.path())
-        .block_size(64)
-        .build();
+    let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
     let db = FlashStore::open(options)?;
 
     // Create 4 L0 files
@@ -367,12 +397,28 @@ fn test_subsystems_compaction_pipeline() -> Result<()> {
 
 #[test]
 fn test_subsystems_merging_iterator_integration() -> Result<()> {
-    let e1 = Entry::new_value(bytes::Bytes::from_static(b"apple"), bytes::Bytes::from_static(b"10"), 1);
-    let e2 = Entry::new_value(bytes::Bytes::from_static(b"cherry"), bytes::Bytes::from_static(b"30"), 1);
+    let e1 = Entry::new_value(
+        bytes::Bytes::from_static(b"apple"),
+        bytes::Bytes::from_static(b"10"),
+        1,
+    );
+    let e2 = Entry::new_value(
+        bytes::Bytes::from_static(b"cherry"),
+        bytes::Bytes::from_static(b"30"),
+        1,
+    );
     let iter1 = SSTableIterator::new(vec![e1, e2]);
 
-    let e3 = Entry::new_value(bytes::Bytes::from_static(b"banana"), bytes::Bytes::from_static(b"20"), 2);
-    let e4 = Entry::new_value(bytes::Bytes::from_static(b"date"), bytes::Bytes::from_static(b"40"), 2);
+    let e3 = Entry::new_value(
+        bytes::Bytes::from_static(b"banana"),
+        bytes::Bytes::from_static(b"20"),
+        2,
+    );
+    let e4 = Entry::new_value(
+        bytes::Bytes::from_static(b"date"),
+        bytes::Bytes::from_static(b"40"),
+        2,
+    );
     let iter2 = SSTableIterator::new(vec![e3, e4]);
 
     let mut merger = MergingIterator::new(vec![iter1, iter2]);
@@ -389,13 +435,17 @@ fn test_subsystems_merging_iterator_integration() -> Result<()> {
     assert_eq!(collected[3].0, bytes::Bytes::from_static(b"date"));
 
     // Test tie-breaking: lower index iterator wins for same key
-    let tie_iter1 = SSTableIterator::new(vec![
-        Entry::new_value(bytes::Bytes::from_static(b"k"), bytes::Bytes::from_static(b"v_newer"), 2),
-    ]);
-    let tie_iter2 = SSTableIterator::new(vec![
-        Entry::new_value(bytes::Bytes::from_static(b"k"), bytes::Bytes::from_static(b"v_older"), 1),
-    ]);
-    let mut tie_merger = MergingIterator::new(vec![tie_iter1, tie_iter2]);
+    let tie_iter1 = SSTableIterator::new(vec![Entry::new_value(
+        bytes::Bytes::from_static(b"k"),
+        bytes::Bytes::from_static(b"v_newer"),
+        2,
+    )]);
+    let tie_iter2 = SSTableIterator::new(vec![Entry::new_value(
+        bytes::Bytes::from_static(b"k"),
+        bytes::Bytes::from_static(b"v_older"),
+        1,
+    )]);
+    let tie_merger = MergingIterator::new(vec![tie_iter1, tie_iter2]);
     assert!(tie_merger.valid());
     assert_eq!(tie_merger.key(), &bytes::Bytes::from_static(b"k"));
     assert_eq!(tie_merger.value(), &bytes::Bytes::from_static(b"v_newer"));
@@ -417,11 +467,17 @@ fn test_large_keys_and_values() -> Result<()> {
     let key = "large_payload_key";
 
     db.put(key, &large_value)?;
-    assert_eq!(db.get(key)?, Some(bytes::Bytes::copy_from_slice(&large_value)));
+    assert_eq!(
+        db.get(key)?,
+        Some(bytes::Bytes::copy_from_slice(&large_value))
+    );
 
     // Flush and verify SSTable reader handles multi-block large values
     db.flush()?;
-    assert_eq!(db.get(key)?, Some(bytes::Bytes::copy_from_slice(&large_value)));
+    assert_eq!(
+        db.get(key)?,
+        Some(bytes::Bytes::copy_from_slice(&large_value))
+    );
 
     Ok(())
 }
@@ -497,10 +553,7 @@ fn test_range_scan_edge_cases() -> Result<()> {
 #[test]
 fn test_interleaved_flushes_deletions_compaction() -> Result<()> {
     let dir = tempdir().unwrap();
-    let options = OptionsBuilder::new()
-        .dir(dir.path())
-        .block_size(64)
-        .build();
+    let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
     let db = FlashStore::open(options)?;
 
     // Cycle 1: Put & Flush
@@ -596,13 +649,529 @@ fn test_concurrent_batch_writes_and_scans() -> Result<()> {
             for i in 0..5 {
                 let k = format!("th_{}_b_{}_k_{}", t, b, i);
                 let expected = format!("val_{}_{}_{}", t, b, i);
-                assert_eq!(
-                    db.get(k)?,
-                    Some(bytes::Bytes::from(expected))
-                );
+                assert_eq!(db.get(k)?, Some(bytes::Bytes::from(expected)));
             }
         }
     }
 
     Ok(())
+}
+
+#[test]
+fn test_crash_recovery_corrupted_wal_tail() -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().to_path_buf();
+
+    // 1. Write valid entries to WAL and close cleanly
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+        db.put(b"valid_k1", b"valid_v1")?;
+        db.put(b"valid_k2", b"valid_v2")?;
+        db.put(b"valid_k3", b"valid_v3")?;
+        db.close()?;
+    }
+
+    // 2. Intentionally append corrupted/garbage bytes to current.wal
+    let wal_path = db_path.join("current.wal");
+    assert!(wal_path.exists());
+    {
+        let mut file = OpenOptions::new().append(true).open(&wal_path)?;
+        file.write_all(b"\xDE\xAD\xBE\xEF\x00\x00\x00\x04garbage_tail_data")?;
+        file.sync_all()?;
+    }
+
+    // 3. Reopen DB and ensure clean recovery up to valid records
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+
+        assert_eq!(
+            db.get(b"valid_k1")?,
+            Some(bytes::Bytes::from_static(b"valid_v1"))
+        );
+        assert_eq!(
+            db.get(b"valid_k2")?,
+            Some(bytes::Bytes::from_static(b"valid_v2"))
+        );
+        assert_eq!(
+            db.get(b"valid_k3")?,
+            Some(bytes::Bytes::from_static(b"valid_v3"))
+        );
+
+        // Ensure database can continue operating and writing subsequent records
+        db.put(b"valid_k4", b"valid_v4")?;
+        assert_eq!(
+            db.get(b"valid_k4")?,
+            Some(bytes::Bytes::from_static(b"valid_v4"))
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_bloom_filter_precision_and_false_positive_rate() {
+    use flash_store::sstable::BloomFilter;
+
+    let filter_gen = BloomFilter::new(10);
+    let mut inserted_keys = Vec::new();
+    for i in 0..1000 {
+        inserted_keys.push(bytes::Bytes::from(format!("bloom_test_key_{:06}", i)));
+    }
+
+    let filter_bytes = filter_gen.build_from_keys(&inserted_keys);
+    assert!(!filter_bytes.is_empty());
+
+    // 100% True Positive requirement: all inserted keys MUST return true
+    for key in &inserted_keys {
+        assert!(
+            BloomFilter::may_contain(&filter_bytes, key),
+            "Bloom filter false negative on key {:?}",
+            key
+        );
+    }
+
+    // Measure false positive rate on 5,000 non-existent keys
+    let mut false_positives = 0;
+    let non_existent_count = 5000;
+    for i in 1000..(1000 + non_existent_count) {
+        let absent_key = format!("bloom_absent_key_{:06}", i);
+        if BloomFilter::may_contain(&filter_bytes, absent_key.as_bytes()) {
+            false_positives += 1;
+        }
+    }
+
+    let fp_rate = (false_positives as f64) / (non_existent_count as f64);
+    assert!(
+        fp_rate < 0.03,
+        "False positive rate too high: {} (expected < 3% for 10 bits/key)",
+        fp_rate
+    );
+}
+
+#[test]
+fn test_lru_block_cache_eviction_and_stats() -> Result<()> {
+    let dir = tempdir().unwrap();
+    // Configure a small block cache (512 bytes) and tiny blocks (64 bytes)
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .block_size(64)
+        .block_cache_size(512)
+        .build();
+    let db = FlashStore::open(options)?;
+
+    // Write enough data to span multiple SSTable data blocks and trigger cache evictions
+    for i in 0..100 {
+        let key = format!("cache_key_{:04}", i);
+        let val = format!("cache_val_payload_{:08}", i);
+        db.put(key, val)?;
+    }
+    db.flush()?;
+
+    // Read back all keys to exercise block cache hit/miss paths
+    for i in 0..100 {
+        let key = format!("cache_key_{:04}", i);
+        let expected = format!("cache_val_payload_{:08}", i);
+        assert_eq!(db.get(key)?, Some(bytes::Bytes::from(expected)));
+    }
+
+    // Read back a second time to ensure cache hits function accurately
+    for i in 0..100 {
+        let key = format!("cache_key_{:04}", i);
+        let expected = format!("cache_val_payload_{:08}", i);
+        assert_eq!(db.get(key)?, Some(bytes::Bytes::from(expected)));
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_repeated_reopen_and_multiple_compaction_generations() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().to_path_buf();
+
+    for gen in 0..5 {
+        let options = OptionsBuilder::new().dir(&db_path).block_size(64).build();
+        let db = FlashStore::open(options)?;
+
+        // Write generation specific keys
+        for i in 0..20 {
+            let k = format!("gen_{}_k_{:02}", gen, i);
+            let v = format!("gen_{}_v_{:02}", gen, i);
+            db.put(k, v)?;
+        }
+        db.flush()?;
+
+        if gen > 0 {
+            // Delete previous generation's first 5 keys
+            for i in 0..5 {
+                let k = format!("gen_{}_k_{:02}", gen - 1, i);
+                db.delete(k)?;
+            }
+            db.flush()?;
+            db.compact()?;
+        }
+
+        db.close()?;
+    }
+
+    // Reopen and verify latest state across all generations
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+
+        for gen in 0..5 {
+            for i in 0..20 {
+                let k = format!("gen_{}_k_{:02}", gen, i);
+                let actual = db.get(&k)?;
+                if gen < 4 && i < 5 {
+                    assert_eq!(actual, None, "Key {} should have been deleted", k);
+                } else {
+                    let expected = format!("gen_{}_v_{:02}", gen, i);
+                    assert_eq!(
+                        actual,
+                        Some(bytes::Bytes::from(expected)),
+                        "Key {} value mismatch",
+                        k
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_boundary_keys_and_unicode() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // Test zero-byte, binary, and diverse Unicode keys
+    let test_cases: Vec<(&[u8], &[u8])> = vec![
+        (b"", b"empty_key_value"),
+        (b"\x00", b"null_byte_value"),
+        (b"\x00\x00\x01", b"binary_key_1"),
+        (b"\xFF\xFE\xFD", b"binary_high_bytes"),
+        ("⚡ FlashStore 🚀".as_bytes(), "fast and safe".as_bytes()),
+        ("日本語キー".as_bytes(), "東京".as_bytes()),
+        ("مفتاح_عربي".as_bytes(), "قيمة_عربية".as_bytes()),
+    ];
+
+    for (k, v) in &test_cases {
+        db.put(*k, *v)?;
+    }
+
+    for (k, v) in &test_cases {
+        assert_eq!(db.get(*k)?, Some(bytes::Bytes::copy_from_slice(v)));
+    }
+
+    // Flush and verify after persistence
+    db.flush()?;
+
+    for (k, v) in &test_cases {
+        assert_eq!(db.get(*k)?, Some(bytes::Bytes::copy_from_slice(v)));
+    }
+
+    // Range scan should return all keys in sorted order
+    let scan_results = db.scan(None, None)?;
+    assert_eq!(scan_results.len(), test_cases.len());
+
+    // Verify ordering
+    for i in 1..scan_results.len() {
+        assert!(scan_results[i - 1].0 < scan_results[i].0);
+    }
+
+    // Delete unicode key
+    db.delete("⚡ FlashStore 🚀")?;
+    assert_eq!(db.get("⚡ FlashStore 🚀")?, None);
+
+    Ok(())
+}
+
+#[test]
+fn test_concurrent_compaction_with_live_traffic() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .memtable_size(512)
+        .build();
+    let db = Arc::new(FlashStore::open(options)?);
+
+    let mut handles = Vec::new();
+
+    // 2 Concurrent Writers
+    for t in 0..2 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || -> Result<()> {
+            for i in 0..60 {
+                let k = format!("live_k_{}_{}", t, i);
+                let v = format!("live_val_{}_{}", t, i);
+                db_clone.put(k, v)?;
+            }
+            Ok(())
+        }));
+    }
+
+    // 2 Concurrent Readers
+    for t in 0..2 {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || -> Result<()> {
+            for _ in 0..60 {
+                let _ = db_clone.get(format!("live_k_{}_0", t))?;
+            }
+            Ok(())
+        }));
+    }
+
+    // 1 Concurrent Compactor / Flusher
+    {
+        let db_clone = Arc::clone(&db);
+        handles.push(thread::spawn(move || -> Result<()> {
+            for _ in 0..5 {
+                let _ = db_clone.flush();
+                let _ = db_clone.compact();
+            }
+            Ok(())
+        }));
+    }
+
+    for handle in handles {
+        handle.join().unwrap()?;
+    }
+
+    // Verify all written keys exist
+    for t in 0..2 {
+        for i in 0..60 {
+            let k = format!("live_k_{}_{}", t, i);
+            let expected = format!("live_val_{}_{}", t, i);
+            assert_eq!(db.get(k)?, Some(bytes::Bytes::from(expected)));
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_atomic_write_batch_mixed_and_overwrites() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // Initial state
+    db.put(b"shared_k1", b"initial_v1")?;
+    db.put(b"shared_k2", b"initial_v2")?;
+
+    // Batch with overwrites, additions, and deletions
+    let mut batch = WriteBatch::new();
+    batch.put(b"shared_k1", b"overwritten_v1");
+    batch.delete(b"shared_k2");
+    batch.put(b"shared_k3", b"new_v3");
+    batch.put(b"shared_k4", b"new_v4");
+    batch.delete(b"shared_k4"); // Deleted in same batch
+
+    db.write_batch(batch)?;
+
+    assert_eq!(
+        db.get(b"shared_k1")?,
+        Some(bytes::Bytes::from_static(b"overwritten_v1"))
+    );
+    assert_eq!(db.get(b"shared_k2")?, None);
+    assert_eq!(
+        db.get(b"shared_k3")?,
+        Some(bytes::Bytes::from_static(b"new_v3"))
+    );
+    assert_eq!(db.get(b"shared_k4")?, None);
+
+    Ok(())
+}
+
+#[test]
+fn test_concurrent_writes_during_flush_crash_recovery() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().to_path_buf();
+
+    // 1. Open DB, perform writes and trigger flush while writing more
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = Arc::new(FlashStore::open(options)?);
+
+        // Pre-fill keys
+        for i in 0..50 {
+            db.put(format!("pre_{}", i), format!("pre_val_{}", i))?;
+        }
+
+        let db_clone1 = Arc::clone(&db);
+        let t1 = thread::spawn(move || -> Result<()> {
+            db_clone1.flush()?;
+            Ok(())
+        });
+
+        let db_clone2 = Arc::clone(&db);
+        let t2 = thread::spawn(move || -> Result<()> {
+            for i in 0..50 {
+                db_clone2.put(format!("concurrent_{}", i), format!("concurrent_val_{}", i))?;
+            }
+            Ok(())
+        });
+
+        t1.join().unwrap()?;
+        t2.join().unwrap()?;
+
+        // Close without clean flush to test crash recovery of in-memory active writes
+        db.close()?;
+    }
+
+    // 2. Reopen DB and verify every key is intact (no lost updates)
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+
+        for i in 0..50 {
+            let k = format!("pre_{}", i);
+            let expected = format!("pre_val_{}", i);
+            assert_eq!(db.get(k)?, Some(bytes::Bytes::from(expected)));
+        }
+
+        for i in 0..50 {
+            let k = format!("concurrent_{}", i);
+            let expected = format!("concurrent_val_{}", i);
+            assert_eq!(db.get(k)?, Some(bytes::Bytes::from(expected)));
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_wal_replay_filtering_with_manifest_sequence() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().to_path_buf();
+
+    // 1. Write batch, flush to SST, write more, simulate crash
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+
+        db.put(b"seq_k1", b"val_flushed")?;
+        db.flush()?;
+
+        db.put(b"seq_k2", b"val_unflushed")?;
+        db.delete(b"seq_k1")?; // Delete in active WAL
+        db.close()?;
+    }
+
+    // 2. Reopen and verify deleted status of seq_k1 and existence of seq_k2
+    {
+        let options = OptionsBuilder::new().dir(&db_path).build();
+        let db = FlashStore::open(options)?;
+
+        assert_eq!(db.get(b"seq_k1")?, None);
+        assert_eq!(
+            db.get(b"seq_k2")?,
+            Some(bytes::Bytes::from_static(b"val_unflushed"))
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_scan_inverted_and_boundary_ranges() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // Scan on completely empty database
+    let empty_scan = db.scan(None, None)?;
+    assert!(empty_scan.is_empty());
+
+    // Insert keys
+    db.put(b"apple", b"1")?;
+    db.put(b"banana", b"2")?;
+    db.put(b"cherry", b"3")?;
+
+    // Inverted bounds (start > end) -> empty result
+    let inverted = db.scan(
+        Some(bytes::Bytes::from_static(b"cherry")),
+        Some(bytes::Bytes::from_static(b"apple")),
+    )?;
+    assert!(inverted.is_empty());
+
+    // Exact equal bounds [banana, banana) -> empty result
+    let equal_bounds = db.scan(
+        Some(bytes::Bytes::from_static(b"banana")),
+        Some(bytes::Bytes::from_static(b"banana")),
+    )?;
+    assert!(equal_bounds.is_empty());
+
+    // Single key range [apple, banana)
+    let single = db.scan(
+        Some(bytes::Bytes::from_static(b"apple")),
+        Some(bytes::Bytes::from_static(b"banana")),
+    )?;
+    assert_eq!(single.len(), 1);
+    assert_eq!(single[0].0, bytes::Bytes::from_static(b"apple"));
+
+    Ok(())
+}
+
+#[test]
+fn test_level_sorted_invariant_and_multi_level_query() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new()
+        .dir(dir.path())
+        .memtable_size(128)
+        .base_level_size_bytes(256)
+        .max_levels(4)
+        .build();
+    let db = FlashStore::open(options)?;
+
+    // Write batches with distinct key ranges
+    for batch_id in 0..8 {
+        let mut batch = WriteBatch::new();
+        for item in 0..10 {
+            let key = format!("k_{:02}_{:02}", batch_id, item);
+            let val = format!("val_{:02}_{:02}", batch_id, item);
+            batch.put(key, val);
+        }
+        db.write_batch(batch)?;
+        db.flush()?;
+    }
+
+    // Run compaction to push files into L1 / L2
+    db.compact()?;
+
+    // Verify all keys can be queried accurately
+    for batch_id in 0..8 {
+        for item in 0..10 {
+            let key = format!("k_{:02}_{:02}", batch_id, item);
+            let expected = format!("val_{:02}_{:02}", batch_id, item);
+            assert_eq!(db.get(key)?, Some(bytes::Bytes::from(expected)));
+        }
+    }
+
+    let stats = db.stats();
+    assert!(stats.levels_file_count.len() >= 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_block_decode_corrupted_payload() {
+    use flash_store::sstable::Block;
+
+    // Decoding tiny buffer < 4 bytes returns corruption error
+    let short_data = bytes::Bytes::from_static(b"abc");
+    assert!(Block::decode(short_data).is_err());
+
+    // Decoding buffer with bogus offset count returns corruption error
+    let mut bogus = vec![0u8; 10];
+    bogus[6..10].copy_from_slice(&999999u32.to_le_bytes());
+    assert!(Block::decode(bytes::Bytes::from(bogus)).is_err());
 }

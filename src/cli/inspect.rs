@@ -25,8 +25,12 @@ pub fn inspect_sst<P: AsRef<Path>>(path: P, format: OutputFormat) -> Result<()> 
     let value_count = entries.iter().filter(|e| e.is_value()).count();
     let tombstone_count = entries.iter().filter(|e| e.is_tombstone()).count();
 
-    let smallest_key = entries.first().map(|e| String::from_utf8_lossy(&e.key).into_owned());
-    let largest_key = entries.last().map(|e| String::from_utf8_lossy(&e.key).into_owned());
+    let smallest_key = entries
+        .first()
+        .map(|e| String::from_utf8_lossy(&e.key).into_owned());
+    let largest_key = entries
+        .last()
+        .map(|e| String::from_utf8_lossy(&e.key).into_owned());
 
     match format {
         OutputFormat::Json => {
@@ -47,7 +51,10 @@ pub fn inspect_sst<P: AsRef<Path>>(path: P, format: OutputFormat) -> Result<()> 
                     })
                 }).collect::<Vec<_>>(),
             });
-            println!("{}", serde_json::to_string_pretty(&json_out).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json_out).unwrap_or_else(|_| "{}".into())
+            );
         }
         OutputFormat::Tsv | OutputFormat::Text => {
             println!("=== SSTable Inspection: {} ===", path_ref.display());
@@ -55,8 +62,14 @@ pub fn inspect_sst<P: AsRef<Path>>(path: P, format: OutputFormat) -> Result<()> 
             println!("Total Entries:    {}", total_entries);
             println!("  Values:         {}", value_count);
             println!("  Tombstones:     {}", tombstone_count);
-            println!("Smallest Key:     {}", smallest_key.unwrap_or_else(|| "(none)".into()));
-            println!("Largest Key:      {}", largest_key.unwrap_or_else(|| "(none)".into()));
+            println!(
+                "Smallest Key:     {}",
+                smallest_key.unwrap_or_else(|| "(none)".into())
+            );
+            println!(
+                "Largest Key:      {}",
+                largest_key.unwrap_or_else(|| "(none)".into())
+            );
             println!("\n--- Entries Preview (first 10) ---");
             for (idx, entry) in entries.iter().take(10).enumerate() {
                 println!(
@@ -89,11 +102,15 @@ mod tests {
     #[test]
     fn test_inspect_sst_execution() -> Result<()> {
         let dir = tempdir().unwrap();
-        let sst_path = dir.path().join("000001.sst");
+        let sst_path = crate::sstable::table_path(dir.path(), 1);
         let options = OptionsBuilder::new().block_size(64).build();
 
         let mut builder = TableBuilder::new(&sst_path, options)?;
-        builder.add(Entry::new_value(Bytes::from_static(b"a"), Bytes::from_static(b"1"), 1))?;
+        builder.add(Entry::new_value(
+            Bytes::from_static(b"a"),
+            Bytes::from_static(b"1"),
+            1,
+        ))?;
         builder.add(Entry::new_tombstone(Bytes::from_static(b"b"), 2))?;
         builder.finish()?;
 

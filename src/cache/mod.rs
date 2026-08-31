@@ -2,12 +2,19 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
+/// Trait defining uncompressed block caching functionality.
 pub trait BlockCache: Send + Sync {
+    /// Retrieves a cached data block by `(file_number, block_offset)` key.
     fn get(&self, key: &(u64, u64)) -> Option<Bytes>;
+    /// Inserts a decoded data block into the cache.
     fn insert(&self, key: (u64, u64), value: Bytes);
+    /// Removes a block from the cache, returning it if present.
     fn remove(&self, key: &(u64, u64)) -> Option<Bytes>;
+    /// Clears all entries from the cache.
     fn clear(&self);
+    /// Returns the current number of cached blocks.
     fn len(&self) -> usize;
+    /// Returns `true` if the cache contains no blocks.
     fn is_empty(&self) -> bool;
 }
 
@@ -89,8 +96,10 @@ impl LruInner {
 
     fn get(&mut self, key: &(u64, u64)) -> Option<Bytes> {
         if let Some(&idx) = self.map.get(key) {
-            self.detach(idx);
-            self.attach_head(idx);
+            if self.head != Some(idx) {
+                self.detach(idx);
+                self.attach_head(idx);
+            }
             self.nodes[idx].as_ref().map(|n| n.value.clone())
         } else {
             None
@@ -161,17 +170,33 @@ impl LruInner {
     }
 }
 
+/// A thread-safe Least-Recently-Used (LRU) block cache.
+///
+/// Manages uncompressed data blocks to accelerate repeated reads.
+///
+/// # Examples
+///
+/// ```rust
+/// use flash_store::cache::{BlockCache, LruBlockCache};
+/// use bytes::Bytes;
+///
+/// let cache = LruBlockCache::new(2);
+/// cache.insert((1, 0), Bytes::from_static(b"block_data"));
+/// assert_eq!(cache.get(&(1, 0)), Some(Bytes::from_static(b"block_data")));
+/// ```
 pub struct LruBlockCache {
     inner: Mutex<LruInner>,
 }
 
 impl LruBlockCache {
+    /// Creates a new `LruBlockCache` with the given capacity limit (number of blocks).
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: Mutex::new(LruInner::new(capacity)),
         }
     }
 
+    /// Checks if a key `(file_number, block_offset)` is present in the cache.
     #[inline]
     pub fn contains_key(&self, key: &(u64, u64)) -> bool {
         self.inner.lock().map.contains_key(key)

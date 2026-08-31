@@ -6,20 +6,24 @@ use crate::error::Result;
 use crate::manifest::version::FileMetaData;
 use crate::manifest::{Manifest, VersionSet};
 use crate::memtable::MemTable;
-use crate::sstable::{TableBuilder, TableReader};
+use crate::sstable::{table_path, TableBuilder, TableReader};
 use crate::types::{Entry, IntoBytes, Key, Value, ValueType};
 use crate::wal::record::WalRecord;
 use crate::wal::{WalReader, WalWriter};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+/// Real-time runtime statistics and internal memory metrics for FlashStore.
 #[derive(Debug, Clone)]
 pub struct Stats {
+    /// Approximate byte size of the active mutable MemTable.
     pub active_memtable_size: usize,
+    /// Number of immutable MemTables currently queued in memory for disk flushing.
     pub immutable_memtables_count: usize,
+    /// Number of active SSTable files per LSM level (index 0 corresponds to Level 0).
     pub levels_file_count: Vec<usize>,
 }
 
@@ -27,15 +31,35 @@ struct EngineInner {
     options: Options,
     memtable: RwLock<Arc<MemTable>>,
     imm_memtables: RwLock<Vec<Arc<MemTable>>>,
-    wal: RwLock<WalWriter>,
+    wal: Mutex<WalWriter>,
     manifest: Manifest,
     version_set: VersionSet,
     block_cache: Arc<dyn BlockCache>,
     memtable_id_seq: AtomicUsize,
-    flush_lock: parking_lot::Mutex<()>,
-    compact_lock: parking_lot::Mutex<()>,
+    flush_lock: Mutex<()>,
+    compact_lock: Mutex<()>,
 }
 
+/// The primary embedded LSM-tree key-value storage engine handle.
+///
+/// `FlashStore` is cheaply cloneable (internally wrapped in an `Arc`) and safe
+/// to share and invoke across multiple concurrent threads.
+///
+/// # Examples
+///
+/// ```rust
+/// use flash_store::prelude::*;
+///
+/// # fn main() -> Result<()> {
+/// # let dir = tempfile::tempdir().unwrap();
+/// let options = OptionsBuilder::new().dir(dir.path()).build();
+/// let db = FlashStore::open(options)?;
+///
+/// db.put("key1", "val1")?;
+/// assert_eq!(db.get("key1")?.unwrap(), "val1".as_bytes());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct FlashStore {
     inner: Arc<EngineInner>,
@@ -73,10 +97,12 @@ impl FlashStore {
                         if record.seq_no > max_seq {
                             max_seq = record.seq_no;
                         }
-                        if record.is_delete {
-                            initial_memtable.delete(record.key, record.seq_no);
-                        } else {
-                            initial_memtable.put(record.key, record.value, record.seq_no);
+                        if record.seq_no > version_set.last_sequence() {
+                            if record.is_delete {
+                                initial_memtable.delete(record.key, record.seq_no);
+                            } else {
+                                initial_memtable.put(record.key, record.value, record.seq_no);
+                            }
                         }
                     }
                 }
@@ -92,13 +118,13 @@ impl FlashStore {
             options,
             memtable: RwLock::new(initial_memtable),
             imm_memtables: RwLock::new(Vec::new()),
-            wal: RwLock::new(wal),
+            wal: Mutex::new(wal),
             manifest,
             version_set,
             block_cache,
             memtable_id_seq: AtomicUsize::new(1),
-            flush_lock: parking_lot::Mutex::new(()),
-            compact_lock: parking_lot::Mutex::new(()),
+            flush_lock: Mutex::new(()),
+            compact_lock: Mutex::new(()),
         });
 
         Ok(Self { inner })
@@ -115,7 +141,7 @@ impl FlashStore {
             is_delete: false,
             seq_no: seq,
         };
-        self.inner.wal.read().append(&record)?;
+        self.inner.wal.lock().append(&record)?;
         self.inner.memtable.read().put(key, value, seq);
 
         self.maybe_schedule_flush()?;
@@ -144,13 +170,9 @@ impl FlashStore {
         let version = self.inner.version_set.current();
 
         // Level 0: search files in reverse order (newest to oldest)
-        if let Some(l0) = version.levels.get(0) {
+        if let Some(l0) = version.levels.first() {
             for file_meta in l0.iter().rev() {
-                let file_path = self
-                    .inner
-                    .options
-                    .dir
-                    .join(format!("{:06}.sst", file_meta.file_number));
+                let file_path = table_path(&self.inner.options.dir, file_meta.file_number);
                 if file_path.exists() {
                     let mut reader = TableReader::open_with_cache(
                         &file_path,
@@ -167,14 +189,10 @@ impl FlashStore {
         // Level 1..N: files are non-overlapping and sorted by key range
         for level in version.levels.iter().skip(1) {
             for file_meta in level {
-                if &key < &file_meta.smallest_key || &key > &file_meta.largest_key {
+                if key < file_meta.smallest_key || key > file_meta.largest_key {
                     continue;
                 }
-                let file_path = self
-                    .inner
-                    .options
-                    .dir
-                    .join(format!("{:06}.sst", file_meta.file_number));
+                let file_path = table_path(&self.inner.options.dir, file_meta.file_number);
                 if file_path.exists() {
                     let mut reader = TableReader::open_with_cache(
                         &file_path,
@@ -201,7 +219,7 @@ impl FlashStore {
             is_delete: true,
             seq_no: seq,
         };
-        self.inner.wal.read().append(&record)?;
+        self.inner.wal.lock().append(&record)?;
         self.inner.memtable.read().delete(key, seq);
 
         self.maybe_schedule_flush()?;
@@ -240,7 +258,7 @@ impl FlashStore {
             }
         }
 
-        self.inner.wal.read().append_batch(&records)?;
+        self.inner.wal.lock().append_batch(&records)?;
 
         {
             let memtable = self.inner.memtable.read();
@@ -271,16 +289,13 @@ impl FlashStore {
         };
 
         let file_num = self.inner.version_set.next_file_number();
-        let sst_path = self
-            .inner
-            .options
-            .dir
-            .join(format!("{:06}.sst", file_num));
+        let sst_path = table_path(&self.inner.options.dir, file_num);
         let mut builder = TableBuilder::new(&sst_path, self.inner.options.clone())?;
 
         let mut iter = old_mem.iter();
         let mut smallest_key = None;
         let mut largest_key = None;
+        let mut max_flushed_seq = 0;
         let mut count = 0;
 
         while iter.valid() {
@@ -289,6 +304,9 @@ impl FlashStore {
                     smallest_key = Some(entry.key.clone());
                 }
                 largest_key = Some(entry.key.clone());
+                if entry.seq_no > max_flushed_seq {
+                    max_flushed_seq = entry.seq_no;
+                }
                 builder.add(entry.clone())?;
                 count += 1;
             }
@@ -307,20 +325,51 @@ impl FlashStore {
 
                 let mut edit = crate::manifest::version::VersionEdit::new();
                 edit.add_file(0, meta);
-                edit.last_sequence = Some(self.inner.version_set.last_sequence());
+                if max_flushed_seq > 0 {
+                    edit.last_sequence = Some(max_flushed_seq);
+                }
                 edit.next_file_number = Some(file_num + 1);
                 self.inner.manifest.log_edit(&edit)?;
                 self.inner.version_set.log_and_apply(edit);
             }
         }
 
-        // Reset WAL only after SSTable + manifest are durably written
-        self.inner.wal.write().reset()?;
+        // Safely update WAL and immutable memtables:
+        // Re-write WAL with any remaining unflushed entries (from other imm_memtables or active memtable)
+        {
+            let mut wal_writer = self.inner.wal.lock();
+            let mut imm_guard = self.inner.imm_memtables.write();
+            imm_guard.retain(|m| m.id() != old_mem.id());
 
-        self.inner
-            .imm_memtables
-            .write()
-            .retain(|m| m.id() != old_mem.id());
+            // Collect all remaining unflushed entries in sequence
+            let mut remaining_records = Vec::new();
+            for imm in imm_guard.iter() {
+                let mut iter = imm.iter();
+                while iter.valid() {
+                    if let Some(entry) = iter.item() {
+                        remaining_records.push(WalRecord::from(entry));
+                    }
+                    iter.next();
+                }
+            }
+
+            {
+                let active = self.inner.memtable.read();
+                let mut iter = active.iter();
+                while iter.valid() {
+                    if let Some(entry) = iter.item() {
+                        remaining_records.push(WalRecord::from(entry));
+                    }
+                    iter.next();
+                }
+            }
+
+            wal_writer.reset()?;
+            if !remaining_records.is_empty() {
+                remaining_records.sort_by_key(|r| r.seq_no);
+                wal_writer.append_batch(&remaining_records)?;
+            }
+        }
 
         Ok(())
     }
@@ -352,11 +401,7 @@ impl FlashStore {
 
             // Remove obsolete SSTable files from disk
             for (_, file_number) in edit.deleted_files {
-                let path = self
-                    .inner
-                    .options
-                    .dir
-                    .join(format!("{:06}.sst", file_number));
+                let path = table_path(&self.inner.options.dir, file_number);
                 if path.exists() {
                     let _ = fs::remove_file(path);
                 }
@@ -386,11 +431,7 @@ impl FlashStore {
         let version = self.inner.version_set.current();
         for level in &version.levels {
             for file_meta in level {
-                let file_path = self
-                    .inner
-                    .options
-                    .dir
-                    .join(format!("{:06}.sst", file_meta.file_number));
+                let file_path = table_path(&self.inner.options.dir, file_meta.file_number);
                 if file_path.exists() {
                     let mut reader = TableReader::open_with_cache(
                         &file_path,
@@ -437,12 +478,12 @@ impl FlashStore {
                 continue;
             }
             if let Some(ref start) = start_key {
-                if &key < start {
+                if key < *start {
                     continue;
                 }
             }
             if let Some(ref end) = end_key {
-                if &key >= end {
+                if key >= *end {
                     continue;
                 }
             }
@@ -462,7 +503,7 @@ impl FlashStore {
     }
 
     pub fn close(&self) -> Result<()> {
-        self.inner.wal.write().sync()?;
+        self.inner.wal.lock().sync()?;
         Ok(())
     }
 
@@ -537,10 +578,7 @@ mod tests {
     #[test]
     fn test_engine_compaction_and_data_integrity() -> Result<()> {
         let dir = tempdir().unwrap();
-        let options = OptionsBuilder::new()
-            .dir(dir.path())
-            .block_size(64)
-            .build();
+        let options = OptionsBuilder::new().dir(dir.path()).block_size(64).build();
         let db = FlashStore::open(options)?;
 
         // Produce 4 SSTables in L0

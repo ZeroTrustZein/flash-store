@@ -1,3 +1,4 @@
+use crate::types::{Entry, ValueType};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +8,30 @@ pub struct WalRecord {
     pub value: Bytes,
     pub is_delete: bool,
     pub seq_no: u64,
+}
+
+impl From<&Entry> for WalRecord {
+    #[inline]
+    fn from(entry: &Entry) -> Self {
+        Self {
+            key: entry.key.clone(),
+            value: entry.value.clone(),
+            is_delete: entry.value_type == ValueType::Tombstone,
+            seq_no: entry.seq_no,
+        }
+    }
+}
+
+impl From<Entry> for WalRecord {
+    #[inline]
+    fn from(entry: Entry) -> Self {
+        Self {
+            key: entry.key,
+            value: entry.value,
+            is_delete: entry.value_type == ValueType::Tombstone,
+            seq_no: entry.seq_no,
+        }
+    }
 }
 
 impl WalRecord {

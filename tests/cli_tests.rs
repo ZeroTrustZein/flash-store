@@ -224,7 +224,10 @@ fn test_cli_flush_compact_stats_commands() -> Result<()> {
     // Insert keys and flush
     let db = open_db(&opts)?;
     for i in 0..10 {
-        db.put(format!("k_{}", i).into_bytes(), format!("v_{}", i).into_bytes())?;
+        db.put(
+            format!("k_{}", i).into_bytes(),
+            format!("v_{}", i).into_bytes(),
+        )?;
     }
 
     run(Cmd::Flush, &opts)?;
@@ -269,7 +272,7 @@ fn test_cli_inspect_sstable() -> Result<()> {
     db.put(Bytes::from_static(b"inspect_b"), Bytes::from_static(b"200"))?;
     db.flush()?;
 
-    let sst_path = dir.path().join("000001.sst");
+    let sst_path = flash_store::sstable::table_path(dir.path(), 1);
     assert!(sst_path.exists());
 
     // Inspect by direct path
@@ -327,16 +330,10 @@ fn test_cli_bench_command() -> Result<()> {
 #[test]
 fn test_repl_tokenizer_edge_cases() -> Result<()> {
     // Normal words
-    assert_eq!(
-        tokenize_line("SET key value")?,
-        vec!["SET", "key", "value"]
-    );
+    assert_eq!(tokenize_line("SET key value")?, vec!["SET", "key", "value"]);
 
     // Multiple spaces
-    assert_eq!(
-        tokenize_line("  PUT    k    v   ")?,
-        vec!["PUT", "k", "v"]
-    );
+    assert_eq!(tokenize_line("  PUT    k    v   ")?, vec!["PUT", "k", "v"]);
 
     // Double quotes with spaces
     assert_eq!(
@@ -405,9 +402,18 @@ fn test_repl_command_dispatch() -> Result<()> {
     assert!(execute_repl_command(&db, &["COMPACT".into()])?.is_some());
     assert!(execute_repl_command(&db, &["STATS".into()])?.is_some());
     assert!(execute_repl_command(&db, &["HELP".into()])?.is_some());
-    assert_eq!(execute_repl_command(&db, &["EXIT".into()])?, Some("BYE".into()));
-    assert_eq!(execute_repl_command(&db, &["QUIT".into()])?, Some("BYE".into()));
-    assert_eq!(execute_repl_command(&db, &["Q".into()])?, Some("BYE".into()));
+    assert_eq!(
+        execute_repl_command(&db, &["EXIT".into()])?,
+        Some("BYE".into())
+    );
+    assert_eq!(
+        execute_repl_command(&db, &["QUIT".into()])?,
+        Some("BYE".into())
+    );
+    assert_eq!(
+        execute_repl_command(&db, &["Q".into()])?,
+        Some("BYE".into())
+    );
 
     // Unknown command
     assert!(execute_repl_command(&db, &["FOOBAR".into()]).is_err());

@@ -52,9 +52,8 @@ impl TableReader {
         file.seek(SeekFrom::Start(footer.index_offset))?;
         let mut index_buf = vec![0u8; footer.index_size as usize];
         file.read_exact(&mut index_buf)?;
-        let (first_keys, block_offsets): (Vec<Bytes>, Vec<u64>) =
-            bincode::deserialize(&index_buf)
-                .map_err(|e| FlashStoreError::Corruption(e.to_string()))?;
+        let (first_keys, block_offsets): (Vec<Bytes>, Vec<u64>) = bincode::deserialize(&index_buf)
+            .map_err(|e| FlashStoreError::Corruption(e.to_string()))?;
 
         Ok(Self {
             file,
@@ -92,15 +91,11 @@ impl TableReader {
         }
 
         let block = self.read_block(block_idx)?;
-        for i in 0..block.entries_len() {
-            if let Some(entry) = block.get_entry(i) {
-                if &entry.key == key {
-                    if entry.value_type == ValueType::Tombstone {
-                        return Ok(Some(None));
-                    } else {
-                        return Ok(Some(Some(entry.value)));
-                    }
-                }
+        if let Some(entry) = block.get_by_key(key) {
+            if entry.value_type == ValueType::Tombstone {
+                return Ok(Some(None));
+            } else {
+                return Ok(Some(Some(entry.value)));
             }
         }
 
@@ -154,13 +149,13 @@ mod tests {
     use super::*;
     use crate::cache::LruBlockCache;
     use crate::config::OptionsBuilder;
-    use crate::sstable::TableBuilder;
+    use crate::sstable::{table_path, TableBuilder};
     use tempfile::tempdir;
 
     #[test]
     fn test_sstable_build_and_read() -> Result<()> {
         let dir = tempdir().unwrap();
-        let sst_path = dir.path().join("000001.sst");
+        let sst_path = table_path(dir.path(), 1);
         let options = OptionsBuilder::new().block_size(64).build();
 
         let mut builder = TableBuilder::new(&sst_path, options)?;
@@ -199,12 +194,16 @@ mod tests {
     #[test]
     fn test_sstable_reader_with_block_cache() -> Result<()> {
         let dir = tempdir().unwrap();
-        let sst_path = dir.path().join("000002.sst");
+        let sst_path = table_path(dir.path(), 2);
         let options = OptionsBuilder::new().block_size(64).build();
 
         let mut builder = TableBuilder::new(&sst_path, options)?;
         let e1 = Entry::new_value(Bytes::from_static(b"apple"), Bytes::from_static(b"red"), 1);
-        let e2 = Entry::new_value(Bytes::from_static(b"banana"), Bytes::from_static(b"yellow"), 2);
+        let e2 = Entry::new_value(
+            Bytes::from_static(b"banana"),
+            Bytes::from_static(b"yellow"),
+            2,
+        );
         builder.add(e1)?;
         builder.add(e2)?;
         builder.finish()?;
