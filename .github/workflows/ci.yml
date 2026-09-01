@@ -106,14 +106,14 @@ jobs:
         run: cargo check --benches --examples --all-features
 
   msrv:
-    name: MSRV Check (1.70.0)
+    name: MSRV Check (1.75.0)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install MSRV Rust toolchain
-        uses: dtolnay/rust-toolchain@1.70.0
+        uses: dtolnay/rust-toolchain@1.75.0
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2

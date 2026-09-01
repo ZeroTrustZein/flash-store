@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Zein <zeindergham@gmail.com>"]
 description = "An Embedded Thread-Safe LSM-Tree Key-Value Storage Engine in Rust"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/zeindergham/flash-store"
+license = "MIT"
+repository = "https://github.com/ZeroTrustZein/flash-store"
 
 [dependencies]
 bytes = { version = "1.5", features = ["serde"] }

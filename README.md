@@ -1,10 +1,8 @@
 # ⚡ FlashStore
 
-[![Crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange.svg)](https://crates.io/crates/flash-store)
-[![Documentation](https://docs.rs/flash-store/badge.svg)](https://docs.rs/flash-store)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
-[![CI Status](https://github.com/zeindergham/flash-store/actions/workflows/ci.yml/badge.svg)](https://github.com/zeindergham/flash-store/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/badge/rustc-1.70.0%2B-brightgreen.svg)](https://blog.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI Status](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rustc-1.75%2B-brightgreen.svg)](https://blog.rust-lang.org/)
 
 **FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, and fast range scans, FlashStore provides a modular architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, and atomic VersionSet metadata management.
 
@@ -187,7 +185,7 @@ Add FlashStore to your project's `Cargo.toml`:
 
 ```toml
 [dependencies]
-flash-store = { git = "https://github.com/zeindergham/flash-store.git" }
+flash-store = { git = "https://github.com/ZeroTrustZein/flash-store.git" }
 bytes = "1.5"
 ```
 
@@ -835,18 +833,13 @@ cargo test --doc
 
 The CI matrix builds and tests across:
 - **Operating Systems**: Ubuntu (`ubuntu-latest`), Windows (`windows-latest`), macOS (`macos-latest`).
-- **Rust Toolchains**: Stable, MSRV (`1.70.0`).
+- **Rust Toolchains**: Stable, MSRV (`1.75.0`).
 - **Security Audits**: Automated cargo security advisory checks via `cargo-audit`.
 
 ---
 
-## 📄 License & Contributions
+## 📄 License
 
-Licensed under either of:
+This project is licensed under the [MIT License](LICENSE).
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](http://www.apache.org/licenses/LICENSE-2.0))
-- MIT License ([LICENSE-MIT](http://opensource.org/licenses/MIT))
-
-at your option.
-
-Contributions are welcome! Feel free to open issues or submit pull requests on [GitHub](https://github.com/zeindergham/flash-store).
+Developed as an open-source technical portfolio project demonstrating database internals, LSM-Tree storage architectures, concurrent data structures, and systems programming in Rust.
