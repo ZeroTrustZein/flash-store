@@ -194,7 +194,11 @@ impl ContextAssembler {
                         if remaining > header_only.len() + 15 {
                             let available_text_chars = remaining - header_only.len() - 10;
                             let truncated_text = if available_text_chars < doc_text.len() {
-                                format!("{}... [truncated]", &doc_text[..available_text_chars])
+                                let mut end = available_text_chars;
+                                while end > 0 && !doc_text.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("{}... [truncated]", &doc_text[..end])
                             } else {
                                 doc_text.to_string()
                             };
@@ -258,7 +262,10 @@ impl ContextAssembler {
                     String::new()
                 };
                 let meta_str = Self::format_meta_summary(doc, config);
-                format!("### [{}] {}{}{}\n{}", index, doc.id, score_str, meta_str, text)
+                format!(
+                    "### [{}] {}{}{}\n{}",
+                    index, doc.id, score_str, meta_str, text
+                )
             }
             ContextFormat::Xml => {
                 let score_attr = if config.include_scores {
@@ -412,7 +419,9 @@ mod tests {
         let assembled = ContextAssembler::assemble(&docs, &config);
         assert_eq!(assembled.doc_count, 2);
         assert!(assembled.text.contains("### [1] doc1 (Score: 0.950)"));
-        assert!(assembled.text.contains("First document with essential info"));
+        assert!(assembled
+            .text
+            .contains("First document with essential info"));
         assert_eq!(assembled.citations.len(), 2);
         assert_eq!(assembled.citations[0].doc_id, "doc1");
         assert_eq!(assembled.citations[1].doc_id, "doc2");
@@ -437,7 +446,9 @@ mod tests {
         let assembled = ContextAssembler::assemble(&docs, &config);
         assert!(assembled.text.starts_with("<context>"));
         assert!(assembled.text.ends_with("</context>"));
-        assert!(assembled.text.contains("<document id=\"doc_xml\" index=\"1\""));
+        assert!(assembled
+            .text
+            .contains("<document id=\"doc_xml\" index=\"1\""));
     }
 
     #[test]

@@ -4,6 +4,19 @@ use crate::rag::{Document, EvaluationSummary, PipelineQueryResult, RagEngine, Sc
 use crate::types::{Key, Value};
 use serde_json::json;
 
+/// Truncates string to `max_bytes`, safely snapping down to the nearest UTF-8 character boundary.
+pub fn safe_truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        s
+    } else {
+        let mut end = max_bytes;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
+    }
+}
+
 /// Format and display a slice of key-value pairs according to the chosen format.
 pub fn format_kv_pairs(pairs: &[(Key, Value)], format: OutputFormat, quiet: bool) {
     match format {
@@ -142,7 +155,7 @@ pub fn format_rag_results(hits: &[ScoredDocument], format: OutputFormat, show_ex
                     .unwrap_or("")
                     .replace(['\n', '\r', '\t'], " ");
                 let text_preview = if text_preview.len() > 60 {
-                    format!("{}...", &text_preview[..60])
+                    format!("{}...", safe_truncate_str(&text_preview, 60))
                 } else {
                     text_preview
                 };
@@ -185,7 +198,7 @@ pub fn format_rag_results(hits: &[ScoredDocument], format: OutputFormat, show_ex
                 );
                 if let Some(ref text) = d.text {
                     let snippet = if text.len() > 200 {
-                        format!("{}...", &text[..200])
+                        format!("{}...", safe_truncate_str(text, 200))
                     } else {
                         text.clone()
                     };
@@ -193,10 +206,8 @@ pub fn format_rag_results(hits: &[ScoredDocument], format: OutputFormat, show_ex
                 }
                 if let Some(ref meta) = d.metadata {
                     if !meta.is_empty() {
-                        let meta_str: Vec<String> = meta
-                            .iter()
-                            .map(|(k, v)| format!("{}: {}", k, v))
-                            .collect();
+                        let meta_str: Vec<String> =
+                            meta.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
                         println!("   Metadata: {{{}}}", meta_str.join(", "));
                     }
                 }
@@ -348,9 +359,18 @@ pub fn format_evaluation_summary(summary: &EvaluationSummary, format: OutputForm
             println!("=== RAG IR Retrieval Evaluation (K = {}) ===", summary.k);
             println!("Evaluated Queries:      {}", summary.sample_count);
             println!("Mean Reciprocal Rank:   {:.4}", summary.mrr);
-            println!("NDCG@{}:                 {:.4}", summary.k, summary.ndcg_at_k);
-            println!("Precision@{}:            {:.4}", summary.k, summary.precision_at_k);
-            println!("Recall@{}:               {:.4}", summary.k, summary.recall_at_k);
+            println!(
+                "NDCG@{}:                 {:.4}",
+                summary.k, summary.ndcg_at_k
+            );
+            println!(
+                "Precision@{}:            {:.4}",
+                summary.k, summary.precision_at_k
+            );
+            println!(
+                "Recall@{}:               {:.4}",
+                summary.k, summary.recall_at_k
+            );
             println!(
                 "Hit Rate@{}:             {:.2}%",
                 summary.k,

@@ -508,7 +508,10 @@ fn test_cli_rag_ingest_and_query_lifecycle() -> Result<()> {
         Cmd::Rag {
             command: RagCmd::Ingest {
                 id: Some("rag_doc_1".into()),
-                text: Some("FlashStore is a thread-safe embedded LSM-Tree key-value database in Rust.".into()),
+                text: Some(
+                    "FlashStore is a thread-safe embedded LSM-Tree key-value database in Rust."
+                        .into(),
+                ),
                 file: None,
                 batch_file: None,
                 title: Some("FlashStore Architecture".into()),
@@ -527,7 +530,10 @@ fn test_cli_rag_ingest_and_query_lifecycle() -> Result<()> {
     let pipeline = open_rag_pipeline(&opts)?;
     let doc = pipeline.get_document("rag_doc_1");
     assert!(doc.is_some());
-    assert_eq!(doc.as_ref().unwrap().metadata.get_string("author"), Some("Zein"));
+    assert_eq!(
+        doc.as_ref().unwrap().metadata.get_string("author"),
+        Some("Zein")
+    );
 
     // 3. Get document via CLI Get in text and json
     run(
@@ -804,7 +810,12 @@ fn test_repl_rag_full_session() -> Result<()> {
     // RAG QUERY
     let res = execute_repl_command(
         &db,
-        &["RAG".into(), "QUERY".into(), "embedded storage".into(), "1".into()],
+        &[
+            "RAG".into(),
+            "QUERY".into(),
+            "embedded storage".into(),
+            "1".into(),
+        ],
     )?;
     assert!(res.unwrap().contains("r_doc"));
 
@@ -944,4 +955,3 @@ fn test_cli_rag_error_handling_and_validation() -> Result<()> {
 
     Ok(())
 }
-

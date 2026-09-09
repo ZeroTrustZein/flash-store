@@ -22,10 +22,13 @@ pub use cache::{SemanticCache, SemanticCacheEntry};
 pub use chunker::{chunk_document, chunk_text};
 pub use config::{RagConfig, RagConfigBuilder, SimilarityMetric};
 pub use context::{
-    AssembledContext, Citation, ContextAssembler, ContextConfig, ContextFormat,
-    RagPromptTemplate, TruncationStrategy,
+    AssembledContext, Citation, ContextAssembler, ContextConfig, ContextFormat, RagPromptTemplate,
+    TruncationStrategy,
 };
-pub use dense::{cosine_similarity, dot_product, euclidean_distance, DenseIndex};
+pub use dense::{
+    compute_similarity, compute_similarity_with_norm, cosine_similarity, dot_product,
+    euclidean_distance, DenseIndex,
+};
 pub use engine::{RagEngine, PREFIX_CHUNK, PREFIX_DOC, PREFIX_META, PREFIX_SYS, PREFIX_VEC};
 pub use hybrid::{
     borda_count_fusion, filter_min_score, reciprocal_rank_fusion, weighted_linear_fusion,

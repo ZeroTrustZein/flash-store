@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::rag::dense::cosine_similarity;
 use crate::rag::sparse::tokenize;
 use crate::rag::types::ScoreExplanation;
@@ -73,39 +75,37 @@ impl LexicalSemanticCrossEncoder {
             };
         }
 
-        // 1. Token match coverage
-        let mut matched_tokens = 0usize;
-        for qt in &q_tokens {
-            if d_tokens.contains(qt) {
-                matched_tokens += 1;
-            }
-        }
+        // 1. Token match coverage with O(1) set lookup
+        let d_set: HashSet<&str> = d_tokens.iter().map(|s| s.as_str()).collect();
+        let matched_tokens = q_tokens
+            .iter()
+            .filter(|qt| d_set.contains(qt.as_str()))
+            .count();
         let token_coverage = matched_tokens as f32 / q_tokens.len() as f32;
 
         // 2. Phrase / bigram match
-        let mut phrase_matches = 0usize;
-        if q_tokens.len() >= 2 && d_tokens.len() >= 2 {
-            for i in 0..q_tokens.len() - 1 {
-                let pair = (&q_tokens[i], &q_tokens[i + 1]);
-                for j in 0..d_tokens.len() - 1 {
-                    if pair == (&d_tokens[j], &d_tokens[j + 1]) {
-                        phrase_matches += 1;
-                        break;
-                    }
-                }
-            }
-        }
-        let phrase_score = if q_tokens.len() >= 2 {
+        let phrase_score = if q_tokens.len() >= 2 && d_tokens.len() >= 2 {
+            let d_bigrams: HashSet<(&str, &str)> = d_tokens
+                .windows(2)
+                .map(|w| (w[0].as_str(), w[1].as_str()))
+                .collect();
+            let phrase_matches = q_tokens
+                .windows(2)
+                .filter(|w| d_bigrams.contains(&(w[0].as_str(), w[1].as_str())))
+                .count();
             phrase_matches as f32 / (q_tokens.len() - 1) as f32
+        } else if q_tokens.len() >= 2 {
+            0.0
         } else {
             token_coverage
         };
 
-        // 3. Proximity / span density
+        // 3. Proximity / span density with O(1) query set lookup
+        let q_set: HashSet<&str> = q_tokens.iter().map(|s| s.as_str()).collect();
         let mut first_idx = None;
         let mut last_idx = None;
         for (idx, dt) in d_tokens.iter().enumerate() {
-            if q_tokens.contains(dt) {
+            if q_set.contains(dt.as_str()) {
                 if first_idx.is_none() {
                     first_idx = Some(idx);
                 }
@@ -251,19 +251,27 @@ pub fn maximal_marginal_relevance(
     let mut remaining: Vec<usize> = (0..candidates.len()).collect();
     let mut selected: Vec<(usize, f32)> = Vec::with_capacity(top_k.min(candidates.len()));
 
+    // Precompute query relevance score for each candidate once
+    let query_scores: Vec<f32> = candidates
+        .iter()
+        .map(|(_, cand_vec, init_score)| {
+            if query_vec.is_empty() || cand_vec.is_empty() {
+                *init_score
+            } else {
+                let cos = cosine_similarity(query_vec, cand_vec);
+                0.7 * cos + 0.3 * init_score
+            }
+        })
+        .collect();
+
     while selected.len() < top_k && !remaining.is_empty() {
         let mut best_cand_idx = remaining[0];
         let mut best_rem_pos = 0;
         let mut best_mmr = f32::NEG_INFINITY;
 
         for (rem_pos, &cand_idx) in remaining.iter().enumerate() {
-            let (_, cand_vec, init_score) = &candidates[cand_idx];
-            let sim_query = if query_vec.is_empty() || cand_vec.is_empty() {
-                *init_score
-            } else {
-                let cos = cosine_similarity(query_vec, cand_vec);
-                0.7 * cos + 0.3 * init_score
-            };
+            let (_, cand_vec, _) = &candidates[cand_idx];
+            let sim_query = query_scores[cand_idx];
 
             let max_sim_selected = if selected.is_empty() {
                 0.0

@@ -681,7 +681,10 @@ fn test_subsystems_rag_pipeline_with_mock_embedder_and_chunking() {
     let embedder = Arc::new(MockEmbeddingProvider::new(16));
 
     let chunk_cfg = ChunkingConfig {
-        strategy: ChunkingStrategy::FixedTokens { size: 4, overlap: 1 },
+        strategy: ChunkingStrategy::FixedTokens {
+            size: 4,
+            overlap: 1,
+        },
         min_chunk_size: 2,
     };
 
@@ -761,7 +764,10 @@ fn test_concurrent_rag_engine_reads_and_writes() {
         for i in 0..10 {
             let doc = Document::builder(
                 format!("init_doc_{}", i),
-                format!("Initial document content number {} for concurrent testing", i),
+                format!(
+                    "Initial document content number {} for concurrent testing",
+                    i
+                ),
             )
             .embedding(vec![1.0, 0.0, 0.0, 0.0])
             .metadata_field("index", i as i64)
@@ -940,7 +946,9 @@ fn test_rag_full_crash_recovery_with_compaction_and_overwrites() {
         assert_eq!(hits[0].doc_id, "doc_2");
 
         // Verify search for deleted document terms does not retrieve doc_4
-        let hits4 = recovered_engine.search("document number 4", None, 5).unwrap();
+        let hits4 = recovered_engine
+            .search("document number 4", None, 5)
+            .unwrap();
         assert!(hits4.iter().all(|h| h.doc_id != "doc_4"));
     }
 }
@@ -974,15 +982,20 @@ fn test_rag_complex_nested_metadata_filtering() {
         .metadata_field("tags", vec!["prototype"])
         .build();
 
-    let doc4 = Document::builder("doc4", "Enterprise distributed vector index storage database")
-        .metadata_field("tier", "enterprise")
-        .metadata_field("score", 91.0)
-        .metadata_field("nodes", 32i64)
-        .metadata_field("active", false)
-        .metadata_field("tags", vec!["vector", "enterprise"])
-        .build();
+    let doc4 = Document::builder(
+        "doc4",
+        "Enterprise distributed vector index storage database",
+    )
+    .metadata_field("tier", "enterprise")
+    .metadata_field("score", 91.0)
+    .metadata_field("nodes", 32i64)
+    .metadata_field("active", false)
+    .metadata_field("tags", vec!["vector", "enterprise"])
+    .build();
 
-    engine.batch_add_documents(&[doc1, doc2, doc3, doc4]).unwrap();
+    engine
+        .batch_add_documents(&[doc1, doc2, doc3, doc4])
+        .unwrap();
 
     // 1. Gte & Lte numeric filters
     let q_score = RagQuery::builder("storage database")
@@ -1098,9 +1111,7 @@ fn test_rag_all_fusion_algorithms_calibration() {
     engine.clear_cache();
     let q_weighted = RagQuery::builder(query_text)
         .embedding(query_vector.clone())
-        .fusion_strategy(FusionStrategy::WeightedLinear {
-            dense_weight: 0.9,
-        })
+        .fusion_strategy(FusionStrategy::WeightedLinear { dense_weight: 0.9 })
         .top_k(3)
         .build();
     let hits = engine.search_query(&q_weighted).unwrap();
@@ -1155,43 +1166,23 @@ fn test_rag_mmr_diversity_reranking_edge_cases() {
     let query_vec = vec![1.0, 0.0];
 
     // High diversity (lambda = 0.1): doc_c should be picked over doc_b as 2nd item
-    let reranked_diverse = maximal_marginal_relevance(
-        &query_vec,
-        &candidates,
-        0.1,
-        2,
-    );
+    let reranked_diverse = maximal_marginal_relevance(&query_vec, &candidates, 0.1, 2);
     assert_eq!(reranked_diverse.len(), 2);
     assert_eq!(reranked_diverse[0].doc_id, "doc_a");
     assert_eq!(reranked_diverse[1].doc_id, "doc_c");
 
     // Pure relevance (lambda = 1.0): doc_b should be picked 2nd
-    let reranked_pure = maximal_marginal_relevance(
-        &query_vec,
-        &candidates,
-        1.0,
-        2,
-    );
+    let reranked_pure = maximal_marginal_relevance(&query_vec, &candidates, 1.0, 2);
     assert_eq!(reranked_pure.len(), 2);
     assert_eq!(reranked_pure[0].doc_id, "doc_a");
     assert_eq!(reranked_pure[1].doc_id, "doc_b");
 
     // Edge case 1: top_k > candidates
-    let reranked_all = maximal_marginal_relevance(
-        &query_vec,
-        &candidates,
-        0.5,
-        10,
-    );
+    let reranked_all = maximal_marginal_relevance(&query_vec, &candidates, 0.5, 10);
     assert_eq!(reranked_all.len(), 3);
 
     // Edge case 2: empty candidates
-    let empty_res = maximal_marginal_relevance(
-        &query_vec,
-        &[],
-        0.5,
-        5,
-    );
+    let empty_res = maximal_marginal_relevance(&query_vec, &[], 0.5, 5);
     assert!(empty_res.is_empty());
 }
 
@@ -1285,9 +1276,13 @@ fn test_rag_semantic_cache_lru_invalidation_and_clear() {
 
 #[test]
 fn test_rag_chunking_unicode_and_boundary_cases() {
-    let unicode_text = "🦀 Rust is awesome! 🚀 データベース Fast KV store. 日本語テキスト. Café résumé.";
+    let unicode_text =
+        "🦀 Rust is awesome! 🚀 データベース Fast KV store. 日本語テキスト. Café résumé.";
     let config_chars = ChunkingConfig {
-        strategy: ChunkingStrategy::FixedChars { size: 15, overlap: 5 },
+        strategy: ChunkingStrategy::FixedChars {
+            size: 15,
+            overlap: 5,
+        },
         min_chunk_size: 5,
     };
     let chunks = chunk_text(unicode_text, &config_chars);
@@ -1362,17 +1357,21 @@ fn test_rag_context_assembler_all_formats_and_truncation() {
     assert!(xml_context.text.contains("<context>"));
     assert!(xml_context.text.contains("</context>"));
     assert!(xml_context.text.contains("<document id=\"doc_xml\""));
-    assert!(xml_context.text.contains("Storage engine supports <atomic>"));
+    assert!(xml_context
+        .text
+        .contains("Storage engine supports <atomic>"));
 
     // 2. Compact format
     let compact_config = ContextConfig::new().format(ContextFormat::Compact);
     let compact_context = ContextAssembler::assemble(&docs, &compact_config);
-    assert!(compact_context.text.contains("Storage engine supports <atomic>"));
+    assert!(compact_context
+        .text
+        .contains("Storage engine supports <atomic>"));
 
     // 3. Truncation with TruncationStrategy::DropOversized
     let drop_config = ContextConfig::new()
         .format(ContextFormat::Markdown)
-        .max_chars(150)
+        .max_chars(250)
         .truncation_strategy(TruncationStrategy::DropOversized);
     let drop_context = ContextAssembler::assemble(&docs, &drop_config);
     assert_eq!(drop_context.doc_count, 1);
@@ -1441,7 +1440,10 @@ fn test_rag_pipeline_end_to_end_lifecycle_and_deletion() {
     let embedder = Arc::new(MockEmbeddingProvider::new(8));
 
     let chunk_cfg = ChunkingConfig {
-        strategy: ChunkingStrategy::FixedChars { size: 50, overlap: 10 },
+        strategy: ChunkingStrategy::FixedChars {
+            size: 50,
+            overlap: 10,
+        },
         min_chunk_size: 10,
     };
 
@@ -1453,12 +1455,14 @@ fn test_rag_pipeline_end_to_end_lifecycle_and_deletion() {
         .batch_ingest(vec![
             (
                 "doc_pip_1".into(),
-                "FlashStore implements high throughput LSM trees with zero allocation writes.".into(),
+                "FlashStore implements high throughput LSM trees with zero allocation writes."
+                    .into(),
                 None,
             ),
             (
                 "doc_pip_2".into(),
-                "Semantic search combines dense vectors with BM25 plus sparse keyword indexes.".into(),
+                "Semantic search combines dense vectors with BM25 plus sparse keyword indexes."
+                    .into(),
                 None,
             ),
             (
@@ -1483,7 +1487,10 @@ fn test_rag_pipeline_end_to_end_lifecycle_and_deletion() {
     assert!(pipeline.get_document("doc_pip_1").is_none());
 
     let q_res2 = pipeline.query("LSM trees throughput writes", 2).unwrap();
-    assert!(q_res2.documents.iter().all(|d| d.id.as_str() != "doc_pip_1"));
+    assert!(q_res2
+        .documents
+        .iter()
+        .all(|d| d.id.as_str() != "doc_pip_1"));
 }
 
 #[test]
@@ -1547,7 +1554,10 @@ fn test_rag_store_adapter_data_integrity_and_recovery() {
         .unwrap()
         .expect("document not found");
     assert_eq!(loaded.id.as_str(), "doc_store_1");
-    assert_eq!(loaded.text, "Full document body for storage adapter testing.");
+    assert_eq!(
+        loaded.text,
+        "Full document body for storage adapter testing."
+    );
     assert_eq!(loaded.embedding.unwrap().as_slice(), &[0.1, 0.2, 0.3]);
     assert_eq!(loaded.metadata.get_string("env"), Some("production"));
     assert_eq!(loaded.metadata.get_i64("replicas"), Some(3));
@@ -1580,10 +1590,7 @@ fn test_rag_store_adapter_data_integrity_and_recovery() {
     assert!(store.get(&chunk_key).unwrap().is_none());
 
     assert_eq!(
-        store
-            .get(bytes::Bytes::from_static(b"user:zein"))
-            .unwrap(),
+        store.get(bytes::Bytes::from_static(b"user:zein")).unwrap(),
         Some(bytes::Bytes::from_static(b"admin"))
     );
 }
-

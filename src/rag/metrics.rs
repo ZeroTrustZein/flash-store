@@ -227,11 +227,8 @@ impl RetrievalEvaluator {
         let mut hits = 0;
 
         for sample in samples {
-            let relevant: HashSet<&str> = sample
-                .ground_truth_ids
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+            let relevant: HashSet<&str> =
+                sample.ground_truth_ids.iter().map(|s| s.as_str()).collect();
             let retrieved_top_k: Vec<&str> = sample
                 .retrieved_ids
                 .iter()
@@ -348,12 +345,8 @@ mod tests {
         tracker.record_cache_lookup(false);
         tracker.record_cache_lookup(true);
 
-        tracker
-            .search_latency
-            .record(Duration::from_micros(100));
-        tracker
-            .search_latency
-            .record(Duration::from_micros(200));
+        tracker.search_latency.record(Duration::from_micros(100));
+        tracker.search_latency.record(Duration::from_micros(200));
 
         let snap = tracker.snapshot();
         assert_eq!(snap.cache_hits, 2);

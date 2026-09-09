@@ -1,3 +1,4 @@
+use crate::cli::formatter::safe_truncate_str;
 use crate::cli::GlobalOpts;
 use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
@@ -316,7 +317,7 @@ pub fn execute_rag_repl(
                 for (i, d) in res.documents.iter().enumerate() {
                     let snippet = d.text.as_deref().unwrap_or("");
                     let snippet = if snippet.len() > 120 {
-                        format!("{}...", &snippet[..120])
+                        format!("{}...", safe_truncate_str(snippet, 120))
                     } else {
                         snippet.to_string()
                     };
@@ -615,10 +616,7 @@ mod tests {
         )?;
         assert!(ingest_res.unwrap().contains("OK"));
 
-        let get_res = execute_repl_command(
-            &db,
-            &["RAG".into(), "GET".into(), "repl_doc1".into()],
-        )?;
+        let get_res = execute_repl_command(&db, &["RAG".into(), "GET".into(), "repl_doc1".into()])?;
         assert!(get_res.unwrap().contains("repl_doc1"));
 
         let query_res = execute_repl_command(
@@ -644,19 +642,13 @@ mod tests {
         let list_res = execute_repl_command(&db, &["RAG".into(), "LIST".into()])?;
         assert!(list_res.unwrap().contains("repl_doc1"));
 
-        let cache_res = execute_repl_command(
-            &db,
-            &["RAG".into(), "CACHE".into(), "CLEAR".into()],
-        )?;
+        let cache_res = execute_repl_command(&db, &["RAG".into(), "CACHE".into(), "CLEAR".into()])?;
         assert!(cache_res.unwrap().contains("cleared"));
 
         let eval_res = execute_repl_command(&db, &["RAG".into(), "EVAL".into()])?;
         assert!(eval_res.unwrap().contains("Evaluation"));
 
-        let del_res = execute_repl_command(
-            &db,
-            &["RAG".into(), "DEL".into(), "repl_doc1".into()],
-        )?;
+        let del_res = execute_repl_command(&db, &["RAG".into(), "DEL".into(), "repl_doc1".into()])?;
         assert!(del_res.unwrap().contains("OK"));
 
         Ok(())

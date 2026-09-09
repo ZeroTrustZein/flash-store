@@ -316,27 +316,9 @@ impl RagEngine {
                 )
             }
         } else if !dense_hits.is_empty() {
-            dense_hits
-                .into_iter()
-                .take(top_k)
-                .map(|(doc_id, score)| SearchResult {
-                    doc_id,
-                    score,
-                    dense_score: Some(score),
-                    sparse_score: None,
-                })
-                .collect()
+            dense_hits_to_search_results(dense_hits, top_k)
         } else {
-            sparse_hits
-                .into_iter()
-                .take(top_k)
-                .map(|(doc_id, score)| SearchResult {
-                    doc_id,
-                    score,
-                    dense_score: None,
-                    sparse_score: Some(score),
-                })
-                .collect()
+            sparse_hits_to_search_results(sparse_hits, top_k)
         };
         self.metrics.fusion_latency.record(t_fusion.elapsed());
 
@@ -402,13 +384,7 @@ impl RagEngine {
 
     /// Telemetry statistics for the semantic query cache.
     pub fn semantic_cache_stats(&self) -> SemanticCacheStats {
-        SemanticCacheStats {
-            capacity: self.semantic_cache.capacity(),
-            len: self.semantic_cache.len(),
-            hits: self.semantic_cache.total_hits(),
-            misses: self.semantic_cache.total_misses(),
-            hit_rate: self.semantic_cache.hit_rate(),
-        }
+        self.semantic_cache.stats()
     }
 
     /// Executes a structured `RagQuery`, returning rich `ScoredDocument` domain models.
@@ -476,76 +452,22 @@ impl RagEngine {
                 if !dense_hits.is_empty() && !sparse_hits.is_empty() {
                     reciprocal_rank_fusion(&dense_hits, &sparse_hits, k, fetch_k)
                 } else if !dense_hits.is_empty() {
-                    dense_hits
-                        .into_iter()
-                        .take(fetch_k)
-                        .map(|(doc_id, score)| SearchResult {
-                            doc_id,
-                            score,
-                            dense_score: Some(score),
-                            sparse_score: None,
-                        })
-                        .collect()
+                    dense_hits_to_search_results(dense_hits, fetch_k)
                 } else {
-                    sparse_hits
-                        .into_iter()
-                        .take(fetch_k)
-                        .map(|(doc_id, score)| SearchResult {
-                            doc_id,
-                            score,
-                            dense_score: None,
-                            sparse_score: Some(score),
-                        })
-                        .collect()
+                    sparse_hits_to_search_results(sparse_hits, fetch_k)
                 }
             }
             FusionStrategy::WeightedLinear { dense_weight } => {
                 if !dense_hits.is_empty() && !sparse_hits.is_empty() {
                     weighted_linear_fusion(&dense_hits, &sparse_hits, dense_weight, fetch_k)
                 } else if !dense_hits.is_empty() {
-                    dense_hits
-                        .into_iter()
-                        .take(fetch_k)
-                        .map(|(doc_id, score)| SearchResult {
-                            doc_id,
-                            score,
-                            dense_score: Some(score),
-                            sparse_score: None,
-                        })
-                        .collect()
+                    dense_hits_to_search_results(dense_hits, fetch_k)
                 } else {
-                    sparse_hits
-                        .into_iter()
-                        .take(fetch_k)
-                        .map(|(doc_id, score)| SearchResult {
-                            doc_id,
-                            score,
-                            dense_score: None,
-                            sparse_score: Some(score),
-                        })
-                        .collect()
+                    sparse_hits_to_search_results(sparse_hits, fetch_k)
                 }
             }
-            FusionStrategy::DenseOnly => dense_hits
-                .into_iter()
-                .take(fetch_k)
-                .map(|(doc_id, score)| SearchResult {
-                    doc_id,
-                    score,
-                    dense_score: Some(score),
-                    sparse_score: None,
-                })
-                .collect(),
-            FusionStrategy::SparseOnly => sparse_hits
-                .into_iter()
-                .take(fetch_k)
-                .map(|(doc_id, score)| SearchResult {
-                    doc_id,
-                    score,
-                    dense_score: None,
-                    sparse_score: Some(score),
-                })
-                .collect(),
+            FusionStrategy::DenseOnly => dense_hits_to_search_results(dense_hits, fetch_k),
+            FusionStrategy::SparseOnly => sparse_hits_to_search_results(sparse_hits, fetch_k),
         };
 
         // 5. Metadata filtering
@@ -602,7 +524,21 @@ impl RagEngine {
                 .collect()
         } else if query.rerank {
             let rerank_k = query.rerank_top_k.unwrap_or(query.top_k);
-            let reranked = self.rerank(&query.text, &hits, rerank_k);
+            let candidates: Vec<(String, String, f32)> = hits
+                .iter()
+                .filter_map(|hit| {
+                    self.documents
+                        .get(&hit.doc_id)
+                        .map(|text| (hit.doc_id.clone(), text.clone(), hit.score))
+                })
+                .collect();
+
+            let reranked = crate::rag::reranker::rerank_candidates_with_explanation(
+                &self.cross_encoder,
+                &query.text,
+                &candidates,
+                rerank_k,
+            );
             let rank_map: HashMap<String, RerankResult> = reranked
                 .into_iter()
                 .map(|r| (r.doc_id.clone(), r))
@@ -613,9 +549,6 @@ impl RagEngine {
                     if let Some(rr) = rank_map.get(&hit.doc_id) {
                         let text = self.documents.get(&hit.doc_id).cloned();
                         let metadata = self.metadata.get(&hit.doc_id).cloned();
-                        let explanation = text
-                            .as_ref()
-                            .map(|t| self.cross_encoder.explain(&query.text, t));
                         Some(ScoredDocument {
                             id: DocumentId::new(&hit.doc_id),
                             score: rr.reranked_score,
@@ -623,7 +556,7 @@ impl RagEngine {
                             sparse_score: hit.sparse_score,
                             text,
                             metadata,
-                            explanation,
+                            explanation: rr.explanation.clone(),
                         })
                     } else {
                         None
@@ -659,6 +592,32 @@ impl RagEngine {
         self.metrics.search_latency.record(start.elapsed());
         Ok(scored_docs)
     }
+}
+
+#[inline]
+fn dense_hits_to_search_results(hits: Vec<(String, f32)>, top_k: usize) -> Vec<SearchResult> {
+    hits.into_iter()
+        .take(top_k)
+        .map(|(doc_id, score)| SearchResult {
+            doc_id,
+            score,
+            dense_score: Some(score),
+            sparse_score: None,
+        })
+        .collect()
+}
+
+#[inline]
+fn sparse_hits_to_search_results(hits: Vec<(String, f32)>, top_k: usize) -> Vec<SearchResult> {
+    hits.into_iter()
+        .take(top_k)
+        .map(|(doc_id, score)| SearchResult {
+            doc_id,
+            score,
+            dense_score: None,
+            sparse_score: Some(score),
+        })
+        .collect()
 }
 
 #[cfg(test)]

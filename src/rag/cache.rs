@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{FlashStoreError, Result};
-use crate::rag::dense::cosine_similarity;
+use crate::rag::dense::{dot_product, l2_norm};
 use crate::rag::hybrid::SearchResult;
+use crate::rag::types::SemanticCacheStats;
 use serde::{Deserialize, Serialize};
 
 /// Returns current Unix epoch timestamp in seconds.
@@ -99,6 +100,17 @@ impl SemanticCache {
         }
     }
 
+    /// Returns telemetry statistics snapshot of the semantic cache.
+    pub fn stats(&self) -> SemanticCacheStats {
+        SemanticCacheStats {
+            capacity: self.capacity,
+            len: self.entries.len(),
+            hits: self.total_hits(),
+            misses: self.total_misses(),
+            hit_rate: self.hit_rate(),
+        }
+    }
+
     /// Performs semantic lookup: finds a cached entry whose embedding cosine similarity
     /// meets or exceeds the similarity threshold and has not expired.
     pub fn lookup(&mut self, query_embedding: &[f32]) -> Option<Vec<SearchResult>> {
@@ -111,13 +123,24 @@ impl SemanticCache {
                 .retain(|e| now.saturating_sub(e.created_at) < ttl);
         }
 
+        let query_norm = l2_norm(query_embedding);
+        if query_norm == 0.0 {
+            self.total_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+
         let mut best_match: Option<(usize, f32)> = None;
 
         for (idx, entry) in self.entries.iter().enumerate() {
             if entry.embedding.len() != query_embedding.len() {
                 continue;
             }
-            let sim = cosine_similarity(&entry.embedding, query_embedding);
+            let entry_norm = l2_norm(&entry.embedding);
+            if entry_norm == 0.0 {
+                continue;
+            }
+            let sim = (dot_product(&entry.embedding, query_embedding) / (entry_norm * query_norm))
+                .clamp(-1.0, 1.0);
             if sim >= self.threshold {
                 match best_match {
                     Some((_, best_sim)) if sim > best_sim => {

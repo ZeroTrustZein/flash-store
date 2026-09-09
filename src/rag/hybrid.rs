@@ -76,7 +76,11 @@ pub fn reciprocal_rank_fusion(
         })
         .collect();
 
-    fused.sort_by(|a, b| b.score.total_cmp(&a.score));
+    fused.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.doc_id.cmp(&b.doc_id))
+    });
     fused.truncate(top_k);
     fused
 }
@@ -94,30 +98,37 @@ pub fn weighted_linear_fusion(
     let norm_dense = min_max_normalize(dense_results);
     let norm_sparse = min_max_normalize(sparse_results);
 
-    let raw_dense: HashMap<String, f32> = dense_results.iter().cloned().collect();
-    let raw_sparse: HashMap<String, f32> = sparse_results.iter().cloned().collect();
+    let mut doc_scores: HashMap<String, (Option<f32>, Option<f32>)> =
+        HashMap::with_capacity(dense_results.len() + sparse_results.len());
 
-    let mut doc_ids: Vec<String> = raw_dense.keys().chain(raw_sparse.keys()).cloned().collect();
-    doc_ids.sort();
-    doc_ids.dedup();
+    for (id, score) in dense_results {
+        doc_scores.entry(id.clone()).or_insert((None, None)).0 = Some(*score);
+    }
+    for (id, score) in sparse_results {
+        doc_scores.entry(id.clone()).or_insert((None, None)).1 = Some(*score);
+    }
 
-    let mut fused: Vec<SearchResult> = doc_ids
+    let mut fused: Vec<SearchResult> = doc_scores
         .into_iter()
-        .map(|id| {
+        .map(|(id, (dense_score, sparse_score))| {
             let d_norm = norm_dense.get(&id).copied().unwrap_or(0.0);
             let s_norm = norm_sparse.get(&id).copied().unwrap_or(0.0);
             let combined = alpha * d_norm + beta * s_norm;
 
             SearchResult {
-                doc_id: id.clone(),
+                doc_id: id,
                 score: combined,
-                dense_score: raw_dense.get(&id).copied(),
-                sparse_score: raw_sparse.get(&id).copied(),
+                dense_score,
+                sparse_score,
             }
         })
         .collect();
 
-    fused.sort_by(|a, b| b.score.total_cmp(&a.score));
+    fused.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.doc_id.cmp(&b.doc_id))
+    });
     fused.truncate(top_k);
     fused
 }
@@ -177,7 +188,11 @@ pub fn borda_count_fusion(
         })
         .collect();
 
-    fused.sort_by(|a, b| b.score.total_cmp(&a.score));
+    fused.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.doc_id.cmp(&b.doc_id))
+    });
     fused.truncate(top_k);
     fused
 }

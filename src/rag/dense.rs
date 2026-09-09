@@ -48,6 +48,30 @@ pub fn compute_similarity(metric: SimilarityMetric, a: &[f32], b: &[f32]) -> f32
     }
 }
 
+/// Computes similarity score with a precomputed L2 norm for vector `a` (optimizes Cosine).
+#[inline]
+pub fn compute_similarity_with_norm(
+    metric: SimilarityMetric,
+    a: &[f32],
+    norm_a: f32,
+    b: &[f32],
+) -> f32 {
+    match metric {
+        SimilarityMetric::Cosine => {
+            let norm_b = l2_norm(b);
+            if norm_a == 0.0 || norm_b == 0.0 {
+                return 0.0;
+            }
+            (dot_product(a, b) / (norm_a * norm_b)).clamp(-1.0, 1.0)
+        }
+        SimilarityMetric::DotProduct => dot_product(a, b),
+        SimilarityMetric::Euclidean => {
+            let dist = euclidean_distance(a, b);
+            1.0 / (1.0 + dist)
+        }
+    }
+}
+
 /// In-memory dense vector index with configurable similarity metric.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DenseIndex {
@@ -121,11 +145,17 @@ impl DenseIndex {
             return Ok(Vec::new());
         }
 
+        let query_norm = if self.metric == SimilarityMetric::Cosine {
+            l2_norm(query)
+        } else {
+            0.0
+        };
+
         let mut scored: Vec<(String, f32)> = self
             .vectors
             .iter()
             .map(|(id, vec)| {
-                let score = compute_similarity(self.metric, query, vec);
+                let score = compute_similarity_with_norm(self.metric, query, query_norm, vec);
                 (id.clone(), score)
             })
             .collect();

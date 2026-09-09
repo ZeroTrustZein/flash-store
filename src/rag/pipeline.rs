@@ -251,8 +251,9 @@ impl RagPipeline {
 
     /// Lists all indexed documents.
     pub fn list_documents(&self) -> Vec<Document> {
-        let mut docs = Vec::new();
-        for id in self.engine.document_ids() {
+        let ids = self.engine.document_ids();
+        let mut docs = Vec::with_capacity(ids.len());
+        for id in ids {
             if let Some(doc) = self.engine.get_document(&id) {
                 docs.push(doc);
             }
@@ -266,12 +267,14 @@ impl RagPipeline {
     }
 
     /// Ingests a raw text document, automatically chunking and embedding if configured.
+    ///
+    /// Returns the number of chunks created and indexed.
     pub fn ingest_text(
         &mut self,
         doc_id: impl Into<String>,
         text: &str,
         metadata: Option<DocumentMetadata>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let id_str = doc_id.into();
 
         // 1. Generate document-level embedding if provider configured
@@ -293,7 +296,7 @@ impl RagPipeline {
         };
 
         // 3. Chunk if configured
-        if let Some(ref chunk_cfg) = self.chunking_config {
+        let chunk_count = if let Some(ref chunk_cfg) = self.chunking_config {
             doc = doc.chunk(chunk_cfg);
 
             // Generate chunk embeddings if provider available
@@ -303,9 +306,13 @@ impl RagPipeline {
                     chunk.embedding = Some(Embedding::new(c_emb));
                 }
             }
-        }
+            doc.chunks.len()
+        } else {
+            0
+        };
 
-        self.engine.add_document_model(doc)
+        self.engine.add_document_model(doc)?;
+        Ok(chunk_count)
     }
 
     /// Ingests a batch of documents, reporting timing and counts.
@@ -320,11 +327,7 @@ impl RagPipeline {
 
         for (id, text, meta) in items {
             total_chars += text.len();
-            if let Some(ref chunk_cfg) = self.chunking_config {
-                let temp_doc = Document::new(id.as_str(), &text);
-                chunks_created += temp_doc.chunk(chunk_cfg).chunks.len();
-            }
-            self.ingest_text(id, &text, meta)?;
+            chunks_created += self.ingest_text(id, &text, meta)?;
         }
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -385,7 +388,9 @@ mod tests {
         let provider = MockEmbeddingProvider::new(32);
         let v1 = provider.embed_query("Rust LSM storage engine").unwrap();
         let v2 = provider.embed_query("Rust LSM tree database").unwrap();
-        let v3 = provider.embed_query("Banana apple pineapple fruit").unwrap();
+        let v3 = provider
+            .embed_query("Banana apple pineapple fruit")
+            .unwrap();
 
         assert_eq!(v1.len(), 32);
         let sim_similar = cosine_similarity(&v1, &v2);

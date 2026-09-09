@@ -174,23 +174,23 @@ impl RagStoreAdapter {
 
             if key.starts_with(PREFIX_DOC) {
                 let id_bytes = &key[PREFIX_DOC.len()..];
-                if let Ok(id) = String::from_utf8(id_bytes.to_vec()) {
-                    if let Ok(text) = String::from_utf8(val.to_vec()) {
-                        docs_map.insert(id, text);
+                if let Ok(id) = std::str::from_utf8(id_bytes) {
+                    if let Ok(text) = std::str::from_utf8(&val) {
+                        docs_map.insert(id.to_string(), text.to_string());
                     }
                 }
             } else if key.starts_with(PREFIX_VEC) {
                 let id_bytes = &key[PREFIX_VEC.len()..];
-                if let Ok(id) = String::from_utf8(id_bytes.to_vec()) {
+                if let Ok(id) = std::str::from_utf8(id_bytes) {
                     if let Ok(vec) = bincode::deserialize::<Vec<f32>>(&val) {
-                        vecs_map.insert(id, Embedding::new(vec));
+                        vecs_map.insert(id.to_string(), Embedding::new(vec));
                     }
                 }
             } else if key.starts_with(PREFIX_META) {
                 let id_bytes = &key[PREFIX_META.len()..];
-                if let Ok(id) = String::from_utf8(id_bytes.to_vec()) {
+                if let Ok(id) = std::str::from_utf8(id_bytes) {
                     if let Ok(meta) = serde_json::from_slice::<DocumentMetadata>(&val) {
-                        meta_map.insert(id, meta);
+                        meta_map.insert(id.to_string(), meta);
                     }
                 }
             } else if key.starts_with(PREFIX_CHUNK) {
@@ -287,10 +287,7 @@ mod tests {
         let loaded1 = adapter.load_document("doc_atom_1").unwrap().unwrap();
         assert_eq!(loaded1.id.as_str(), "doc_atom_1");
         assert_eq!(loaded1.text, "Atomic storage test document 1");
-        assert_eq!(
-            loaded1.embedding.unwrap().as_slice(),
-            &[0.1, 0.2, 0.3]
-        );
+        assert_eq!(loaded1.embedding.unwrap().as_slice(), &[0.1, 0.2, 0.3]);
         assert_eq!(loaded1.metadata.get_string("tag"), Some("alpha"));
 
         // Recover all

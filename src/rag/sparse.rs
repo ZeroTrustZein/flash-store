@@ -136,20 +136,27 @@ impl SparseIndex {
             return Ok(Vec::new());
         }
 
+        // Aggregate unique query term frequencies
+        let mut qtf: HashMap<&str, usize> = HashMap::with_capacity(query_tokens.len());
+        for t in &query_tokens {
+            *qtf.entry(t.as_str()).or_insert(0) += 1;
+        }
+
         let total_docs = self.len();
         let avg_dl = self.avg_dl().max(1.0);
         let mut scores: HashMap<String, f32> = HashMap::new();
 
-        for token in &query_tokens {
+        for (token, count) in qtf {
             if let Some(postings_map) = self.postings.get(token) {
                 let idf = compute_idf(postings_map.len(), total_docs);
+                let q_weight = count as f32;
                 for (doc_id, &tf) in postings_map {
                     let doc_len = *self.doc_lengths.get(doc_id).unwrap_or(&0) as f32;
                     let tf_f32 = tf as f32;
                     let numerator = tf_f32 * (self.k1 + 1.0);
                     let denominator =
                         tf_f32 + self.k1 * (1.0 - self.b + self.b * (doc_len / avg_dl));
-                    let score = idf * (numerator / denominator + self.delta);
+                    let score = idf * (numerator / denominator + self.delta) * q_weight;
                     *scores.entry(doc_id.clone()).or_insert(0.0) += score;
                 }
             }

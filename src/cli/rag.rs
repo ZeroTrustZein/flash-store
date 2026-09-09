@@ -493,9 +493,8 @@ pub fn run_rag_command(cmd: RagCmd, opts: &GlobalOpts) -> Result<()> {
                                 0.5
                             }
                         });
-                        q_builder = q_builder.fusion_strategy(FusionStrategy::WeightedLinear {
-                            dense_weight: dw,
-                        });
+                        q_builder = q_builder
+                            .fusion_strategy(FusionStrategy::WeightedLinear { dense_weight: dw });
                     }
                 }
 
@@ -641,7 +640,11 @@ mod tests {
             Some("My Title".into()),
             Some("Alice".into()),
             Some("rust,storage,lsm".into()),
-            &["views=100".into(), "ratio=0.75".into(), "active=true".into()],
+            &[
+                "views=100".into(),
+                "ratio=0.75".into(),
+                "active=true".into(),
+            ],
         );
 
         assert_eq!(meta.get_string("title"), Some("My Title"));
