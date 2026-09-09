@@ -61,9 +61,12 @@ pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
 pub use rag::{
     cosine_similarity, dot_product, euclidean_distance, reciprocal_rank_fusion, rerank_candidates,
-    tokenize, weighted_linear_fusion, CrossEncoderScorer, DenseIndex, LexicalSemanticCrossEncoder,
-    RagConfig, RagConfigBuilder, RagEngine, RerankResult, SearchResult, SemanticCache,
-    SemanticCacheEntry, SimilarityMetric, SparseIndex,
+    tokenize, weighted_linear_fusion, ChunkingConfig, ChunkingStrategy, CrossEncoderScorer,
+    DenseIndex, Document, DocumentBuilder, DocumentChunk, DocumentId, DocumentMetadata, Embedding,
+    FilterCondition, FusionStrategy, LexicalSemanticCrossEncoder, MetadataFilter, MetadataValue,
+    RagConfig, RagConfigBuilder, RagEngine, RagQuery, RagQueryBuilder, RerankResult,
+    ScoreExplanation, ScoredDocument, SearchResult, SemanticCache, SemanticCacheEntry,
+    SemanticCacheStats, SimilarityMetric, SparseIndex,
 };
 pub use sstable::{table_file_name, table_path};
 pub use types::{
@@ -85,9 +88,12 @@ pub mod prelude {
     };
     pub use crate::rag::{
         cosine_similarity, dot_product, euclidean_distance, reciprocal_rank_fusion,
-        rerank_candidates, tokenize, weighted_linear_fusion, CrossEncoderScorer, DenseIndex,
-        LexicalSemanticCrossEncoder, RagConfig, RagConfigBuilder, RagEngine, RerankResult,
-        SearchResult, SemanticCache, SemanticCacheEntry, SimilarityMetric, SparseIndex,
+        rerank_candidates, tokenize, weighted_linear_fusion, ChunkingConfig, ChunkingStrategy,
+        CrossEncoderScorer, DenseIndex, Document, DocumentBuilder, DocumentChunk, DocumentId,
+        DocumentMetadata, Embedding, FilterCondition, FusionStrategy, LexicalSemanticCrossEncoder,
+        MetadataFilter, MetadataValue, RagConfig, RagConfigBuilder, RagEngine, RagQuery,
+        RagQueryBuilder, RerankResult, ScoreExplanation, ScoredDocument, SearchResult,
+        SemanticCache, SemanticCacheEntry, SemanticCacheStats, SimilarityMetric, SparseIndex,
     };
     pub use crate::sstable::{table_file_name, table_path};
     pub use crate::types::{

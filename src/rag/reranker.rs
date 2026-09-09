@@ -1,4 +1,5 @@
 use crate::rag::sparse::tokenize;
+use crate::rag::types::ScoreExplanation;
 use serde::{Deserialize, Serialize};
 
 /// Result of cross-encoder reranking.
@@ -12,6 +13,8 @@ pub struct RerankResult {
     pub reranked_score: f32,
     /// Shift in rank position (e.g. +2 means moved up 2 spots, -1 moved down 1 spot).
     pub rank_delta: i32,
+    /// Optional detailed scoring breakdown.
+    pub explanation: Option<ScoreExplanation>,
 }
 
 /// Trait defining a cross-encoder pair scoring model.
@@ -44,13 +47,19 @@ impl Default for LexicalSemanticCrossEncoder {
     }
 }
 
-impl CrossEncoderScorer for LexicalSemanticCrossEncoder {
-    fn score(&self, query: &str, doc_text: &str) -> f32 {
+impl LexicalSemanticCrossEncoder {
+    /// Computes a detailed score explanation breaking down token match, phrase match, and term proximity.
+    pub fn explain(&self, query: &str, doc_text: &str) -> ScoreExplanation {
         let q_tokens = tokenize(query);
         let d_tokens = tokenize(doc_text);
 
         if q_tokens.is_empty() || d_tokens.is_empty() {
-            return 0.0;
+            return ScoreExplanation {
+                token_coverage: 0.0,
+                phrase_match: 0.0,
+                proximity: 0.0,
+                combined_score: 0.0,
+            };
         }
 
         // 1. Token match coverage
@@ -102,10 +111,22 @@ impl CrossEncoderScorer for LexicalSemanticCrossEncoder {
             _ => 0.0,
         };
 
-        // Total weighted score
-        self.token_match_weight * token_coverage
+        let combined_score = self.token_match_weight * token_coverage
             + self.phrase_match_weight * phrase_score
-            + self.proximity_weight * proximity_score
+            + self.proximity_weight * proximity_score;
+
+        ScoreExplanation {
+            token_coverage,
+            phrase_match: phrase_score,
+            proximity: proximity_score,
+            combined_score,
+        }
+    }
+}
+
+impl CrossEncoderScorer for LexicalSemanticCrossEncoder {
+    fn score(&self, query: &str, doc_text: &str) -> f32 {
+        self.explain(query, doc_text).combined_score
     }
 }
 
@@ -147,6 +168,7 @@ pub fn rerank_candidates<S: CrossEncoderScorer>(
                     original_score: orig_score,
                     reranked_score: final_score,
                     rank_delta,
+                    explanation: None,
                 }
             },
         )

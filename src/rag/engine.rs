@@ -9,11 +9,17 @@ use crate::rag::dense::DenseIndex;
 use crate::rag::hybrid::{reciprocal_rank_fusion, weighted_linear_fusion, SearchResult};
 use crate::rag::reranker::{rerank_candidates, LexicalSemanticCrossEncoder, RerankResult};
 use crate::rag::sparse::SparseIndex;
+use crate::rag::types::{
+    Document, DocumentId, DocumentMetadata, Embedding, FusionStrategy, RagQuery, ScoredDocument,
+    SemanticCacheStats,
+};
 
 /// Prefix for document raw text in FlashStore KV engine.
 pub const PREFIX_DOC: &[u8] = b"rag:doc:";
 /// Prefix for document vector embeddings in FlashStore KV engine.
 pub const PREFIX_VEC: &[u8] = b"rag:vec:";
+/// Prefix for document metadata in FlashStore KV engine.
+pub const PREFIX_META: &[u8] = b"rag:meta:";
 
 /// Unified RAG retrieval engine providing hybrid dense-sparse search,
 /// cross-encoder reranking, and semantic query caching with FlashStore integration.
@@ -25,6 +31,8 @@ pub struct RagEngine {
     cross_encoder: LexicalSemanticCrossEncoder,
     /// In-memory document text store for fast reranking and lookup.
     documents: HashMap<String, String>,
+    /// In-memory document metadata store.
+    metadata: HashMap<String, DocumentMetadata>,
     /// Optional underlying persistent FlashStore KV engine.
     store: Option<Arc<FlashStore>>,
 }
@@ -48,6 +56,7 @@ impl RagEngine {
             semantic_cache: cache,
             cross_encoder: cross,
             documents: HashMap::new(),
+            metadata: HashMap::new(),
             store: None,
         }
     }
@@ -89,6 +98,7 @@ impl RagEngine {
 
         self.sparse_index.add_document(id.clone(), text);
         self.documents.insert(id.clone(), text.to_string());
+        self.metadata.entry(id.clone()).or_default();
 
         // Optional persistence to FlashStore
         if let Some(ref db) = self.store {
@@ -105,20 +115,83 @@ impl RagEngine {
         Ok(())
     }
 
+    /// Indexes a complete `Document` domain model with text, embedding, and metadata.
+    pub fn add_document_model(&mut self, doc: Document) -> Result<()> {
+        let id = doc.id.to_string();
+        let text = doc.text;
+        let embedding = doc.embedding;
+        let metadata = doc.metadata;
+
+        if let Some(ref emb) = embedding {
+            self.dense_index
+                .insert(id.clone(), emb.as_slice().to_vec())?;
+        }
+
+        self.sparse_index.add_document(id.clone(), &text);
+        self.documents.insert(id.clone(), text.clone());
+        self.metadata.insert(id.clone(), metadata.clone());
+
+        if let Some(ref db) = self.store {
+            let doc_key = [PREFIX_DOC, id.as_bytes()].concat();
+            db.put(doc_key, text.as_bytes())?;
+
+            if let Some(ref emb) = embedding {
+                let vec_key = [PREFIX_VEC, id.as_bytes()].concat();
+                let encoded = bincode::serialize(emb.as_slice())?;
+                db.put(vec_key, encoded)?;
+            }
+
+            if !metadata.is_empty() {
+                let meta_key = [PREFIX_META, id.as_bytes()].concat();
+                let encoded_meta = serde_json::to_vec(&metadata)?;
+                db.put(meta_key, encoded_meta)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Deletes a document from dense index, sparse index, and document store.
     pub fn delete_document(&mut self, doc_id: &str) -> Result<bool> {
         let removed_dense = self.dense_index.remove(doc_id).is_some();
         let removed_sparse = self.sparse_index.remove_document(doc_id);
         let removed_doc = self.documents.remove(doc_id).is_some();
+        let removed_meta = self.metadata.remove(doc_id).is_some();
 
         if let Some(ref db) = self.store {
             let doc_key = [PREFIX_DOC, doc_id.as_bytes()].concat();
             db.delete(doc_key)?;
             let vec_key = [PREFIX_VEC, doc_id.as_bytes()].concat();
             db.delete(vec_key)?;
+            let meta_key = [PREFIX_META, doc_id.as_bytes()].concat();
+            db.delete(meta_key)?;
         }
 
-        Ok(removed_dense || removed_sparse || removed_doc)
+        Ok(removed_dense || removed_sparse || removed_doc || removed_meta)
+    }
+
+    /// Retrieves a document by id as a domain model.
+    pub fn get_document(&self, doc_id: &str) -> Option<Document> {
+        let text = self.documents.get(doc_id)?;
+        let metadata = self.metadata.get(doc_id).cloned().unwrap_or_default();
+        let embedding = self
+            .dense_index
+            .get(doc_id)
+            .map(|v| Embedding::from_slice(v));
+        Some(Document {
+            id: DocumentId::new(doc_id),
+            text: text.clone(),
+            embedding,
+            metadata,
+            chunks: Vec::new(),
+            created_at: 0,
+            updated_at: 0,
+        })
+    }
+
+    /// Retrieves document metadata by doc_id.
+    pub fn get_document_metadata(&self, doc_id: &str) -> Option<&DocumentMetadata> {
+        self.metadata.get(doc_id)
     }
 
     /// Executes hybrid retrieval for a query.
@@ -224,6 +297,225 @@ impl RagEngine {
             self.semantic_cache.total_misses(),
             self.semantic_cache.hit_rate(),
         )
+    }
+
+    /// Telemetry statistics for the semantic query cache.
+    pub fn semantic_cache_stats(&self) -> SemanticCacheStats {
+        SemanticCacheStats {
+            capacity: self.semantic_cache.capacity(),
+            len: self.semantic_cache.len(),
+            hits: self.semantic_cache.total_hits(),
+            misses: self.semantic_cache.total_misses(),
+            hit_rate: self.semantic_cache.hit_rate(),
+        }
+    }
+
+    /// Executes a structured `RagQuery`, returning rich `ScoredDocument` domain models.
+    pub fn search_query(&mut self, query: &RagQuery) -> Result<Vec<ScoredDocument>> {
+        if query.top_k == 0 {
+            return Ok(Vec::new());
+        }
+
+        // 1. Semantic cache lookup if embedding is provided and no metadata filter is active
+        if query.filter.is_none() {
+            if let Some(ref emb) = query.embedding {
+                if let Some(cached_hits) = self.semantic_cache.lookup(emb.as_slice()) {
+                    let mut results: Vec<ScoredDocument> = cached_hits
+                        .into_iter()
+                        .take(query.top_k)
+                        .map(|sr| {
+                            let text = self.documents.get(&sr.doc_id).cloned();
+                            let metadata = self.metadata.get(&sr.doc_id).cloned();
+                            let mut sd: ScoredDocument = sr.into();
+                            sd.text = text;
+                            sd.metadata = metadata;
+                            sd
+                        })
+                        .collect();
+                    if let Some(min_score) = query.min_score {
+                        results.retain(|r| r.score >= min_score);
+                    }
+                    return Ok(results);
+                }
+            }
+        }
+
+        let fetch_k = query.top_k * 3;
+
+        // 2. Sparse retrieval
+        let sparse_hits = if !matches!(query.fusion_strategy, FusionStrategy::DenseOnly) {
+            self.sparse_index.search(&query.text, fetch_k)?
+        } else {
+            Vec::new()
+        };
+
+        // 3. Dense retrieval
+        let dense_hits = if !matches!(query.fusion_strategy, FusionStrategy::SparseOnly) {
+            if let Some(ref emb) = query.embedding {
+                self.dense_index.search(emb.as_slice(), fetch_k)?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        // 4. Fusion according to strategy
+        let mut hits = match query.fusion_strategy {
+            FusionStrategy::Rrf { k } => {
+                if !dense_hits.is_empty() && !sparse_hits.is_empty() {
+                    reciprocal_rank_fusion(&dense_hits, &sparse_hits, k, fetch_k)
+                } else if !dense_hits.is_empty() {
+                    dense_hits
+                        .into_iter()
+                        .take(fetch_k)
+                        .map(|(doc_id, score)| SearchResult {
+                            doc_id,
+                            score,
+                            dense_score: Some(score),
+                            sparse_score: None,
+                        })
+                        .collect()
+                } else {
+                    sparse_hits
+                        .into_iter()
+                        .take(fetch_k)
+                        .map(|(doc_id, score)| SearchResult {
+                            doc_id,
+                            score,
+                            dense_score: None,
+                            sparse_score: Some(score),
+                        })
+                        .collect()
+                }
+            }
+            FusionStrategy::WeightedLinear { dense_weight } => {
+                if !dense_hits.is_empty() && !sparse_hits.is_empty() {
+                    weighted_linear_fusion(&dense_hits, &sparse_hits, dense_weight, fetch_k)
+                } else if !dense_hits.is_empty() {
+                    dense_hits
+                        .into_iter()
+                        .take(fetch_k)
+                        .map(|(doc_id, score)| SearchResult {
+                            doc_id,
+                            score,
+                            dense_score: Some(score),
+                            sparse_score: None,
+                        })
+                        .collect()
+                } else {
+                    sparse_hits
+                        .into_iter()
+                        .take(fetch_k)
+                        .map(|(doc_id, score)| SearchResult {
+                            doc_id,
+                            score,
+                            dense_score: None,
+                            sparse_score: Some(score),
+                        })
+                        .collect()
+                }
+            }
+            FusionStrategy::DenseOnly => dense_hits
+                .into_iter()
+                .take(fetch_k)
+                .map(|(doc_id, score)| SearchResult {
+                    doc_id,
+                    score,
+                    dense_score: Some(score),
+                    sparse_score: None,
+                })
+                .collect(),
+            FusionStrategy::SparseOnly => sparse_hits
+                .into_iter()
+                .take(fetch_k)
+                .map(|(doc_id, score)| SearchResult {
+                    doc_id,
+                    score,
+                    dense_score: None,
+                    sparse_score: Some(score),
+                })
+                .collect(),
+        };
+
+        // 5. Metadata filtering
+        if let Some(ref filter) = query.filter {
+            hits.retain(|hit| {
+                if let Some(meta) = self.metadata.get(&hit.doc_id) {
+                    filter.matches(meta)
+                } else {
+                    false
+                }
+            });
+        }
+
+        // 6. Populate semantic cache if no filter
+        if query.filter.is_none() {
+            if let Some(ref emb) = query.embedding {
+                let _ =
+                    self.semantic_cache
+                        .insert(&query.text, emb.as_slice().to_vec(), hits.clone());
+            }
+        }
+
+        // 7. Rerank if requested
+        let mut scored_docs: Vec<ScoredDocument> = if query.rerank {
+            let rerank_k = query.rerank_top_k.unwrap_or(query.top_k);
+            let reranked = self.rerank(&query.text, &hits, rerank_k);
+            let rank_map: HashMap<String, RerankResult> = reranked
+                .into_iter()
+                .map(|r| (r.doc_id.clone(), r))
+                .collect();
+
+            hits.into_iter()
+                .filter_map(|hit| {
+                    if let Some(rr) = rank_map.get(&hit.doc_id) {
+                        let text = self.documents.get(&hit.doc_id).cloned();
+                        let metadata = self.metadata.get(&hit.doc_id).cloned();
+                        let explanation = text
+                            .as_ref()
+                            .map(|t| self.cross_encoder.explain(&query.text, t));
+                        Some(ScoredDocument {
+                            id: DocumentId::new(&hit.doc_id),
+                            score: rr.reranked_score,
+                            dense_score: hit.dense_score,
+                            sparse_score: hit.sparse_score,
+                            text,
+                            metadata,
+                            explanation,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            hits.into_iter()
+                .take(query.top_k)
+                .map(|hit| {
+                    let text = self.documents.get(&hit.doc_id).cloned();
+                    let metadata = self.metadata.get(&hit.doc_id).cloned();
+                    ScoredDocument {
+                        id: DocumentId::new(hit.doc_id),
+                        score: hit.score,
+                        dense_score: hit.dense_score,
+                        sparse_score: hit.sparse_score,
+                        text,
+                        metadata,
+                        explanation: None,
+                    }
+                })
+                .collect()
+        };
+
+        scored_docs.sort_by(|a, b| b.score.total_cmp(&a.score));
+
+        if let Some(min_score) = query.min_score {
+            scored_docs.retain(|doc| doc.score >= min_score);
+        }
+
+        scored_docs.truncate(query.top_k);
+        Ok(scored_docs)
     }
 }
 
