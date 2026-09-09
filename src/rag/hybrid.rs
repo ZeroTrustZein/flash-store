@@ -122,6 +122,74 @@ pub fn weighted_linear_fusion(
     fused
 }
 
+/// Standardizes a list of (id, score) pairs using Z-Score normalization.
+pub fn z_score_normalize(hits: &[(String, f32)]) -> HashMap<String, f32> {
+    if hits.is_empty() {
+        return HashMap::new();
+    }
+    let n = hits.len() as f32;
+    let mean: f32 = hits.iter().map(|(_, s)| *s).sum::<f32>() / n;
+    let variance: f32 = hits.iter().map(|(_, s)| (s - mean).powi(2)).sum::<f32>() / n;
+    let std_dev = variance.sqrt();
+
+    let mut map = HashMap::with_capacity(hits.len());
+    for (id, s) in hits {
+        let z = if std_dev.abs() < 1e-6 {
+            0.0
+        } else {
+            (s - mean) / std_dev
+        };
+        map.insert(id.clone(), z);
+    }
+    map
+}
+
+/// Fuses dense and sparse rankings using positional Borda Count voting.
+///
+/// In each list with N items, item at rank `r` (0-indexed) receives `N - r` points.
+/// Points are summed across candidate lists.
+pub fn borda_count_fusion(
+    dense_results: &[(String, f32)],
+    sparse_results: &[(String, f32)],
+    top_k: usize,
+) -> Vec<SearchResult> {
+    let mut points: HashMap<String, f32> = HashMap::new();
+    let dense_map: HashMap<String, f32> = dense_results.iter().cloned().collect();
+    let sparse_map: HashMap<String, f32> = sparse_results.iter().cloned().collect();
+
+    let n_dense = dense_results.len() as f32;
+    for (rank, (doc_id, _)) in dense_results.iter().enumerate() {
+        *points.entry(doc_id.clone()).or_insert(0.0) += n_dense - rank as f32;
+    }
+
+    let n_sparse = sparse_results.len() as f32;
+    for (rank, (doc_id, _)) in sparse_results.iter().enumerate() {
+        *points.entry(doc_id.clone()).or_insert(0.0) += n_sparse - rank as f32;
+    }
+
+    let mut fused: Vec<SearchResult> = points
+        .into_iter()
+        .map(|(doc_id, score)| SearchResult {
+            dense_score: dense_map.get(&doc_id).copied(),
+            sparse_score: sparse_map.get(&doc_id).copied(),
+            doc_id,
+            score,
+        })
+        .collect();
+
+    fused.sort_by(|a, b| b.score.total_cmp(&a.score));
+    fused.truncate(top_k);
+    fused
+}
+
+/// Filters search results with scores below `min_score`.
+pub fn filter_min_score(results: Vec<SearchResult>, min_score: f32) -> Vec<SearchResult> {
+    results
+        .into_iter()
+        .filter(|r| r.score >= min_score)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +230,51 @@ mod tests {
         let dense_favored = weighted_linear_fusion(&dense, &sparse, 0.8, 2);
         assert_eq!(dense_favored[0].doc_id, "docA");
         assert!((dense_favored[0].score - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_borda_count_fusion() {
+        let dense = vec![("docA".to_string(), 0.9), ("docB".to_string(), 0.5)];
+        let sparse = vec![("docB".to_string(), 8.0), ("docA".to_string(), 4.0)];
+
+        let fused = borda_count_fusion(&dense, &sparse, 2);
+        assert_eq!(fused.len(), 2);
+        // docA: dense rank 0 (2 pts) + sparse rank 1 (1 pt) = 3 pts
+        // docB: dense rank 1 (1 pt) + sparse rank 0 (2 pts) = 3 pts
+        assert_eq!(fused[0].score, 3.0);
+        assert_eq!(fused[1].score, 3.0);
+    }
+
+    #[test]
+    fn test_z_score_normalize_and_filter() {
+        let hits = vec![
+            ("docA".to_string(), 10.0),
+            ("docB".to_string(), 20.0),
+            ("docC".to_string(), 30.0),
+        ];
+        let z_scores = z_score_normalize(&hits);
+        assert_eq!(z_scores.len(), 3);
+        // Mean is 20.0, docB should have z ~ 0.0
+        assert!(z_scores.get("docB").unwrap().abs() < 1e-5);
+        assert!(z_scores.get("docA").unwrap() < &0.0);
+        assert!(z_scores.get("docC").unwrap() > &0.0);
+
+        let results = vec![
+            SearchResult {
+                doc_id: "doc1".to_string(),
+                score: 0.8,
+                dense_score: None,
+                sparse_score: None,
+            },
+            SearchResult {
+                doc_id: "doc2".to_string(),
+                score: 0.3,
+                dense_score: None,
+                sparse_score: None,
+            },
+        ];
+        let filtered = filter_min_score(results, 0.5);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].doc_id, "doc1");
     }
 }

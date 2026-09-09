@@ -1,3 +1,4 @@
+use crate::rag::dense::cosine_similarity;
 use crate::rag::sparse::tokenize;
 use crate::rag::types::ScoreExplanation;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,16 @@ pub struct RerankResult {
 pub trait CrossEncoderScorer: Send + Sync {
     /// Computes relevance score for query and document text.
     fn score(&self, query: &str, doc_text: &str) -> f32;
+
+    /// Computes detailed score explanation.
+    fn explain(&self, query: &str, doc_text: &str) -> ScoreExplanation {
+        ScoreExplanation {
+            token_coverage: 0.0,
+            phrase_match: 0.0,
+            proximity: 0.0,
+            combined_score: self.score(query, doc_text),
+        }
+    }
 }
 
 /// Lexical-semantic cross-encoder scorer.
@@ -128,6 +139,81 @@ impl CrossEncoderScorer for LexicalSemanticCrossEncoder {
     fn score(&self, query: &str, doc_text: &str) -> f32 {
         self.explain(query, doc_text).combined_score
     }
+
+    fn explain(&self, query: &str, doc_text: &str) -> ScoreExplanation {
+        self.explain(query, doc_text)
+    }
+}
+
+/// Reranks candidates using a cross-encoder model with customizable blend weight and optional explanation.
+pub fn rerank_candidates_weighted<S: CrossEncoderScorer>(
+    scorer: &S,
+    query: &str,
+    candidates: &[(String, String, f32)],
+    cross_weight: f32,
+    top_k: usize,
+    with_explanation: bool,
+) -> Vec<RerankResult> {
+    if candidates.is_empty() || top_k == 0 {
+        return Vec::new();
+    }
+
+    let alpha = cross_weight.clamp(0.0, 1.0);
+    let beta = 1.0 - alpha;
+
+    let mut scored: Vec<(usize, String, f32, f32, Option<ScoreExplanation>)> = candidates
+        .iter()
+        .enumerate()
+        .map(|(initial_rank, (id, text, orig_score))| {
+            let explanation = if with_explanation {
+                Some(scorer.explain(query, text))
+            } else {
+                None
+            };
+            let cross_score = explanation
+                .as_ref()
+                .map(|e| e.combined_score)
+                .unwrap_or_else(|| scorer.score(query, text));
+            let final_score = alpha * cross_score + beta * orig_score;
+            (
+                initial_rank,
+                id.clone(),
+                *orig_score,
+                final_score,
+                explanation,
+            )
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.3.total_cmp(&a.3));
+    scored.truncate(top_k);
+
+    scored
+        .into_iter()
+        .enumerate()
+        .map(
+            |(new_rank, (initial_rank, doc_id, orig_score, final_score, explanation))| {
+                let rank_delta = initial_rank as i32 - new_rank as i32;
+                RerankResult {
+                    doc_id,
+                    original_score: orig_score,
+                    reranked_score: final_score,
+                    rank_delta,
+                    explanation,
+                }
+            },
+        )
+        .collect()
+}
+
+/// Reranks candidate documents for a given query, attaching detailed scoring explanations.
+pub fn rerank_candidates_with_explanation<S: CrossEncoderScorer>(
+    scorer: &S,
+    query: &str,
+    candidates: &[(String, String, f32)],
+    top_k: usize,
+) -> Vec<RerankResult> {
+    rerank_candidates_weighted(scorer, query, candidates, 0.7, top_k, true)
 }
 
 /// Reranks candidate documents for a given query.
@@ -139,39 +225,81 @@ pub fn rerank_candidates<S: CrossEncoderScorer>(
     candidates: &[(String, String, f32)],
     top_k: usize,
 ) -> Vec<RerankResult> {
+    rerank_candidates_weighted(scorer, query, candidates, 0.7, top_k, false)
+}
+
+/// Computes Maximal Marginal Relevance (MMR) selection of documents to balance relevance and diversity.
+///
+/// Iteratively selects candidates that maximize:
+/// `MMR(d) = lambda * Sim(d, Query) - (1 - lambda) * max_{s in Selected} Sim(d, s)`
+///
+/// - `query_vec`: query embedding vector.
+/// - `candidates`: slice of tuples `(doc_id, embedding, initial_score)`.
+/// - `lambda`: balance factor in `[0.0, 1.0]`. 1.0 focuses entirely on query relevance, 0.0 maximizes diversity.
+/// - `top_k`: maximum number of diverse documents to select.
+pub fn maximal_marginal_relevance(
+    query_vec: &[f32],
+    candidates: &[(String, Vec<f32>, f32)],
+    lambda: f32,
+    top_k: usize,
+) -> Vec<RerankResult> {
     if candidates.is_empty() || top_k == 0 {
         return Vec::new();
     }
 
-    let mut scored: Vec<(usize, String, f32, f32)> = candidates
-        .iter()
-        .enumerate()
-        .map(|(initial_rank, (id, text, orig_score))| {
-            let cross_score = scorer.score(query, text);
-            // Blend cross-encoder score (70%) with original candidate score (30%)
-            let final_score = 0.7 * cross_score + 0.3 * orig_score;
-            (initial_rank, id.clone(), *orig_score, final_score)
-        })
-        .collect();
+    let lambda = lambda.clamp(0.0, 1.0);
+    let mut remaining: Vec<usize> = (0..candidates.len()).collect();
+    let mut selected: Vec<(usize, f32)> = Vec::with_capacity(top_k.min(candidates.len()));
 
-    scored.sort_by(|a, b| b.3.total_cmp(&a.3));
-    scored.truncate(top_k);
+    while selected.len() < top_k && !remaining.is_empty() {
+        let mut best_cand_idx = remaining[0];
+        let mut best_rem_pos = 0;
+        let mut best_mmr = f32::NEG_INFINITY;
 
-    scored
+        for (rem_pos, &cand_idx) in remaining.iter().enumerate() {
+            let (_, cand_vec, init_score) = &candidates[cand_idx];
+            let sim_query = if query_vec.is_empty() || cand_vec.is_empty() {
+                *init_score
+            } else {
+                let cos = cosine_similarity(query_vec, cand_vec);
+                0.7 * cos + 0.3 * init_score
+            };
+
+            let max_sim_selected = if selected.is_empty() {
+                0.0
+            } else {
+                selected
+                    .iter()
+                    .map(|&(sel_idx, _)| cosine_similarity(cand_vec, &candidates[sel_idx].1))
+                    .fold(f32::NEG_INFINITY, f32::max)
+            };
+
+            let mmr_score = lambda * sim_query - (1.0 - lambda) * max_sim_selected;
+            if mmr_score > best_mmr {
+                best_mmr = mmr_score;
+                best_cand_idx = cand_idx;
+                best_rem_pos = rem_pos;
+            }
+        }
+
+        remaining.swap_remove(best_rem_pos);
+        selected.push((best_cand_idx, best_mmr));
+    }
+
+    selected
         .into_iter()
         .enumerate()
-        .map(
-            |(new_rank, (initial_rank, doc_id, orig_score, final_score))| {
-                let rank_delta = initial_rank as i32 - new_rank as i32;
-                RerankResult {
-                    doc_id,
-                    original_score: orig_score,
-                    reranked_score: final_score,
-                    rank_delta,
-                    explanation: None,
-                }
-            },
-        )
+        .map(|(new_rank, (initial_rank, mmr_score))| {
+            let (doc_id, _, orig_score) = &candidates[initial_rank];
+            let rank_delta = initial_rank as i32 - new_rank as i32;
+            RerankResult {
+                doc_id: doc_id.clone(),
+                original_score: *orig_score,
+                reranked_score: mmr_score,
+                rank_delta,
+                explanation: None,
+            }
+        })
         .collect()
 }
 
@@ -218,5 +346,42 @@ mod tests {
         // doc2 had lower initial score (0.3), but cross-encoder reranks it to top
         assert_eq!(reranked[0].doc_id, "doc2");
         assert!(reranked[0].rank_delta > 0); // moved up
+    }
+
+    #[test]
+    fn test_rerank_candidates_with_explanation() {
+        let scorer = LexicalSemanticCrossEncoder::default();
+        let query = "rust lsm";
+        let candidates = vec![(
+            "doc1".to_string(),
+            "rust lsm tree storage engine".to_string(),
+            0.5,
+        )];
+
+        let reranked = rerank_candidates_with_explanation(&scorer, query, &candidates, 1);
+        assert_eq!(reranked.len(), 1);
+        assert!(reranked[0].explanation.is_some());
+        let exp = reranked[0].explanation.as_ref().unwrap();
+        assert!(exp.token_coverage > 0.0);
+        assert!(exp.combined_score > 0.0);
+    }
+
+    #[test]
+    fn test_maximal_marginal_relevance_diversity() {
+        let query_vec = vec![1.0, 0.0, 0.0];
+        // doc1 is identical to doc2 in vector space, both highly relevant
+        // doc3 is orthogonal (diverse) but moderate relevance
+        let candidates = vec![
+            ("doc1".to_string(), vec![1.0, 0.0, 0.0], 0.95),
+            ("doc2".to_string(), vec![0.99, 0.01, 0.0], 0.94),
+            ("doc3".to_string(), vec![0.0, 1.0, 0.0], 0.60),
+        ];
+
+        // With lambda = 0.5, after doc1 is selected, doc2 is heavily penalized for redundancy,
+        // and doc3 is promoted for diversity!
+        let mmr_results = maximal_marginal_relevance(&query_vec, &candidates, 0.3, 2);
+        assert_eq!(mmr_results.len(), 2);
+        assert_eq!(mmr_results[0].doc_id, "doc1");
+        assert_eq!(mmr_results[1].doc_id, "doc3");
     }
 }

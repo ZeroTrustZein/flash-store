@@ -567,6 +567,12 @@ impl Document {
         self
     }
 
+    /// Decomposes this document into chunks according to `config`.
+    pub fn chunk(mut self, config: &ChunkingConfig) -> Self {
+        self.chunks = crate::rag::chunker::chunk_document(&self, config);
+        self
+    }
+
     /// Creates a builder for `Document`.
     pub fn builder(id: impl Into<DocumentId>, text: impl Into<String>) -> DocumentBuilder {
         DocumentBuilder::new(id, text)
@@ -620,6 +626,21 @@ impl DocumentBuilder {
     /// Sets pre-chunked passages.
     pub fn chunks(mut self, chunks: Vec<DocumentChunk>) -> Self {
         self.chunks = chunks;
+        self
+    }
+
+    /// Automatically splits document text into chunks using `config`.
+    pub fn chunk_with(mut self, config: &ChunkingConfig) -> Self {
+        let temp_doc = Document {
+            id: self.id.clone(),
+            text: self.text.clone(),
+            embedding: self.embedding.clone(),
+            metadata: self.metadata.clone(),
+            chunks: Vec::new(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        self.chunks = crate::rag::chunker::chunk_document(&temp_doc, config);
         self
     }
 
@@ -774,6 +795,9 @@ pub struct RagQuery {
     pub rerank_top_k: Option<usize>,
     /// Minimum score threshold to qualify as a hit.
     pub min_score: Option<f32>,
+    /// Optional diversity reranking using Maximal Marginal Relevance (MMR) with balance factor lambda.
+    #[serde(default)]
+    pub mmr_lambda: Option<f32>,
 }
 
 impl RagQuery {
@@ -788,6 +812,7 @@ impl RagQuery {
             rerank: false,
             rerank_top_k: None,
             min_score: None,
+            mmr_lambda: None,
         }
     }
 
@@ -845,6 +870,12 @@ impl RagQueryBuilder {
     /// Sets minimum score cutoff.
     pub fn min_score(mut self, min: f32) -> Self {
         self.query.min_score = Some(min);
+        self
+    }
+
+    /// Enables diversity reranking using Maximal Marginal Relevance (MMR) with balance parameter lambda.
+    pub fn mmr(mut self, lambda: f32) -> Self {
+        self.query.mmr_lambda = Some(lambda.clamp(0.0, 1.0));
         self
     }
 

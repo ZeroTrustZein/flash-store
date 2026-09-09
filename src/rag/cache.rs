@@ -182,6 +182,16 @@ impl SemanticCache {
         Ok(())
     }
 
+    /// Invalidates all cached query entries that returned `doc_id` in their results.
+    ///
+    /// Returns the number of invalidated cache entries.
+    pub fn invalidate_for_doc(&mut self, doc_id: &str) -> usize {
+        let initial_len = self.entries.len();
+        self.entries
+            .retain(|entry| !entry.results.iter().any(|r| r.doc_id == doc_id));
+        initial_len - self.entries.len()
+    }
+
     /// Clears the semantic cache.
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -242,5 +252,32 @@ mod tests {
         // Insert third entry -> evicts one entry
         cache.insert("q3", vec![-1.0, 0.0], vec![]).unwrap();
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_semantic_cache_invalidation_for_doc() {
+        let mut cache = SemanticCache::new(5, 0.90, 3600);
+        let res1 = vec![SearchResult {
+            doc_id: "doc_target".to_string(),
+            score: 0.9,
+            dense_score: None,
+            sparse_score: None,
+        }];
+        let res2 = vec![SearchResult {
+            doc_id: "doc_other".to_string(),
+            score: 0.8,
+            dense_score: None,
+            sparse_score: None,
+        }];
+
+        cache.insert("q1", vec![1.0, 0.0], res1).unwrap();
+        cache.insert("q2", vec![0.0, 1.0], res2).unwrap();
+        assert_eq!(cache.len(), 2);
+
+        let evicted = cache.invalidate_for_doc("doc_target");
+        assert_eq!(evicted, 1);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.lookup(&[1.0, 0.0]).is_none());
+        assert!(cache.lookup(&[0.0, 1.0]).is_some());
     }
 }

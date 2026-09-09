@@ -11,6 +11,20 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Common English stopwords filtered out during sparse indexing when configured.
+pub const DEFAULT_STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it",
+    "its", "of", "on", "that", "the", "to", "was", "were", "will", "with",
+];
+
+/// Tokenizer that normalizes text and filters out common English stopwords.
+pub fn tokenize_filtered(text: &str) -> Vec<String> {
+    tokenize(text)
+        .into_iter()
+        .filter(|t| !DEFAULT_STOPWORDS.contains(&t.as_str()))
+        .collect()
+}
+
 /// Computes Okapi BM25 Inverse Document Frequency (IDF) with smoothing.
 pub fn compute_idf(doc_freq: usize, total_docs: usize) -> f32 {
     let n = doc_freq as f32;
@@ -18,11 +32,13 @@ pub fn compute_idf(doc_freq: usize, total_docs: usize) -> f32 {
     ((total - n + 0.5) / (n + 0.5) + 1.0).ln().max(0.0)
 }
 
-/// In-memory inverted index for sparse lexical retrieval using Okapi BM25 scoring.
+/// In-memory inverted index for sparse lexical retrieval using Okapi BM25 / BM25+ scoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SparseIndex {
     k1: f32,
     b: f32,
+    #[serde(default)]
+    delta: f32,
     /// Term -> (doc_id -> term frequency)
     postings: HashMap<String, HashMap<String, usize>>,
     /// doc_id -> document token length
@@ -32,15 +48,26 @@ pub struct SparseIndex {
 }
 
 impl SparseIndex {
-    /// Creates a new sparse index with the given BM25 hyperparameters.
+    /// Creates a new sparse index with standard BM25 hyperparameters.
     pub fn new(k1: f32, b: f32) -> Self {
+        Self::with_delta(k1, b, 0.0)
+    }
+
+    /// Creates a new sparse index with BM25+ hyperparameters, including lower-bound offset `delta`.
+    pub fn with_delta(k1: f32, b: f32, delta: f32) -> Self {
         Self {
             k1,
             b,
+            delta: delta.max(0.0),
             postings: HashMap::new(),
             doc_lengths: HashMap::new(),
             total_tokens: 0,
         }
+    }
+
+    /// Returns the BM25+ delta parameter.
+    pub fn delta(&self) -> f32 {
+        self.delta
     }
 
     /// Number of indexed documents.
@@ -117,7 +144,7 @@ impl SparseIndex {
                     let numerator = tf_f32 * (self.k1 + 1.0);
                     let denominator =
                         tf_f32 + self.k1 * (1.0 - self.b + self.b * (doc_len / avg_dl));
-                    let score = idf * (numerator / denominator);
+                    let score = idf * (numerator / denominator + self.delta);
                     *scores.entry(doc_id.clone()).or_insert(0.0) += score;
                 }
             }
@@ -182,5 +209,29 @@ mod tests {
         assert_eq!(index.len(), 2);
         let empty_search = index.search("sql", 5).unwrap();
         assert!(empty_search.is_empty());
+    }
+
+    #[test]
+    fn test_bm25_plus_with_delta() {
+        let mut index = SparseIndex::with_delta(1.2, 0.75, 0.5);
+        assert_eq!(index.delta(), 0.5);
+        index.add_document("doc1", "performance database engine");
+        index.add_document("doc2", "performance key value storage");
+
+        let res = index.search("performance", 2).unwrap();
+        assert_eq!(res.len(), 2);
+        assert!(res[0].1 > 0.0);
+    }
+
+    #[test]
+    fn test_tokenize_filtered() {
+        let text = "This is a book on the table with an apple";
+        let filtered = tokenize_filtered(text);
+        assert!(!filtered.contains(&"is".to_string()));
+        assert!(!filtered.contains(&"a".to_string()));
+        assert!(!filtered.contains(&"the".to_string()));
+        assert!(!filtered.contains(&"with".to_string()));
+        assert!(filtered.contains(&"book".to_string()));
+        assert!(filtered.contains(&"apple".to_string()));
     }
 }

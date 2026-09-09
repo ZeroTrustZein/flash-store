@@ -4,6 +4,7 @@
 //! reranking, and semantic vector query caching.
 
 pub mod cache;
+pub mod chunker;
 pub mod config;
 pub mod dense;
 pub mod engine;
@@ -13,14 +14,20 @@ pub mod sparse;
 pub mod types;
 
 pub use cache::{SemanticCache, SemanticCacheEntry};
+pub use chunker::{chunk_document, chunk_text};
 pub use config::{RagConfig, RagConfigBuilder, SimilarityMetric};
 pub use dense::{cosine_similarity, dot_product, euclidean_distance, DenseIndex};
 pub use engine::{RagEngine, PREFIX_DOC, PREFIX_VEC};
-pub use hybrid::{reciprocal_rank_fusion, weighted_linear_fusion, SearchResult};
-pub use reranker::{
-    rerank_candidates, CrossEncoderScorer, LexicalSemanticCrossEncoder, RerankResult,
+pub use hybrid::{
+    borda_count_fusion, filter_min_score, reciprocal_rank_fusion, weighted_linear_fusion,
+    z_score_normalize, SearchResult,
 };
-pub use sparse::{compute_idf, tokenize, SparseIndex};
+pub use reranker::{
+    maximal_marginal_relevance, rerank_candidates, rerank_candidates_weighted,
+    rerank_candidates_with_explanation, CrossEncoderScorer, LexicalSemanticCrossEncoder,
+    RerankResult,
+};
+pub use sparse::{compute_idf, tokenize, tokenize_filtered, SparseIndex};
 pub use types::{
     ChunkingConfig, ChunkingStrategy, Document, DocumentBuilder, DocumentChunk, DocumentId,
     DocumentMetadata, Embedding, FilterCondition, FusionStrategy, MetadataFilter, MetadataValue,

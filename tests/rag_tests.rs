@@ -315,3 +315,171 @@ fn test_rag_metadata_persistence_with_flashstore() {
     assert!(engine.delete_document("doc_meta_persist").unwrap());
     assert!(store.get(b"rag:meta:doc_meta_persist").unwrap().is_none());
 }
+
+#[test]
+fn test_rag_chunking_algorithms() {
+    // 1. Fixed characters chunking
+    let char_cfg = ChunkingConfig {
+        strategy: ChunkingStrategy::FixedChars {
+            size: 25,
+            overlap: 5,
+        },
+        min_chunk_size: 5,
+    };
+    let char_chunks = chunk_text("FlashStore storage engine for fast LSM indexing", &char_cfg);
+    assert!(char_chunks.len() >= 2);
+    assert_eq!(char_chunks[0].0, 0);
+
+    // 2. Fixed tokens chunking with Document
+    let tok_cfg = ChunkingConfig {
+        strategy: ChunkingStrategy::FixedTokens {
+            size: 3,
+            overlap: 1,
+        },
+        min_chunk_size: 3,
+    };
+    let doc = Document::new(
+        "doc_poly",
+        "rust high performance key value embedded database",
+    );
+    let chunked = doc.chunk(&tok_cfg);
+    assert!(chunked.chunks.len() >= 3);
+    assert_eq!(chunked.chunks[0].doc_id.as_str(), "doc_poly");
+    assert_eq!(chunked.chunks[0].chunk_index, 0);
+    assert_eq!(chunked.chunks[1].chunk_index, 1);
+
+    // 3. Paragraph chunking
+    let para_cfg = ChunkingConfig {
+        strategy: ChunkingStrategy::Paragraph,
+        min_chunk_size: 10,
+    };
+    let para_text = "Section 1 provides an overview of the system.\n\nSection 2 describes architecture.\n\nSection 3 summarizes findings.";
+    let para_chunks = chunk_text(para_text, &para_cfg);
+    assert_eq!(para_chunks.len(), 3);
+    assert!(para_chunks[0].2.contains("Section 1"));
+    assert!(para_chunks[1].2.contains("Section 2"));
+    assert!(para_chunks[2].2.contains("Section 3"));
+
+    // 4. Sentence chunking
+    let sent_cfg = ChunkingConfig {
+        strategy: ChunkingStrategy::Sentence,
+        min_chunk_size: 8,
+    };
+    let sent_text = "First sentence is clear! Second sentence has detail. Is the third sentence present? Absolutely.";
+    let sent_chunks = chunk_text(sent_text, &sent_cfg);
+    assert_eq!(sent_chunks.len(), 4);
+}
+
+#[test]
+fn test_rag_mmr_diversity_reranking() {
+    let query_vec = vec![1.0, 0.0, 0.0];
+    let candidates = vec![
+        ("d1".to_string(), vec![1.0, 0.0, 0.0], 0.98),
+        ("d2".to_string(), vec![0.98, 0.02, 0.0], 0.97),
+        ("d3".to_string(), vec![0.0, 1.0, 0.0], 0.65),
+        ("d4".to_string(), vec![0.0, 0.0, 1.0], 0.50),
+    ];
+
+    // High lambda (0.95) favors pure relevance: d1 and d2 win
+    let relevance_mmr = maximal_marginal_relevance(&query_vec, &candidates, 0.95, 2);
+    assert_eq!(relevance_mmr[0].doc_id, "d1");
+    assert_eq!(relevance_mmr[1].doc_id, "d2");
+
+    // Balanced lambda (0.4) penalizes redundant d2 and picks diverse d3
+    let diverse_mmr = maximal_marginal_relevance(&query_vec, &candidates, 0.4, 2);
+    assert_eq!(diverse_mmr[0].doc_id, "d1");
+    assert_eq!(diverse_mmr[1].doc_id, "d3");
+}
+
+#[test]
+fn test_rag_borda_and_z_score_fusion() {
+    let dense = vec![
+        ("docA".to_string(), 0.95),
+        ("docB".to_string(), 0.85),
+        ("docC".to_string(), 0.60),
+    ];
+    let sparse = vec![
+        ("docC".to_string(), 15.0),
+        ("docA".to_string(), 10.0),
+        ("docB".to_string(), 5.0),
+    ];
+
+    let borda_hits = borda_count_fusion(&dense, &sparse, 3);
+    assert_eq!(borda_hits.len(), 3);
+    // docA is rank 0 in dense (3 pts) and rank 1 in sparse (2 pts) = 5 pts
+    // docC is rank 2 in dense (1 pt) and rank 0 in sparse (3 pts) = 4 pts
+    // docB is rank 1 in dense (2 pts) and rank 2 in sparse (1 pt) = 3 pts
+    assert_eq!(borda_hits[0].doc_id, "docA");
+    assert_eq!(borda_hits[0].score, 5.0);
+
+    let z_scores = z_score_normalize(&dense);
+    assert_eq!(z_scores.len(), 3);
+    assert!(z_scores.get("docA").unwrap() > z_scores.get("docB").unwrap());
+    assert!(z_scores.get("docB").unwrap() > z_scores.get("docC").unwrap());
+}
+
+#[test]
+fn test_rag_bm25_plus_and_stopwords() {
+    let mut index = SparseIndex::with_delta(1.2, 0.75, 0.5);
+    index.add_document("doc1", "the quick brown fox jumps over the lazy dog");
+    index.add_document("doc2", "a lazy dog sleeps under a tree");
+
+    let results = index.search("lazy dog", 2).unwrap();
+    assert_eq!(results.len(), 2);
+
+    let tokens = tokenize_filtered("the cat is on the mat with a dog");
+    assert!(!tokens.contains(&"the".to_string()));
+    assert!(!tokens.contains(&"is".to_string()));
+    assert!(!tokens.contains(&"on".to_string()));
+    assert!(!tokens.contains(&"with".to_string()));
+    assert!(!tokens.contains(&"a".to_string()));
+    assert!(tokens.contains(&"cat".to_string()));
+    assert!(tokens.contains(&"mat".to_string()));
+    assert!(tokens.contains(&"dog".to_string()));
+}
+
+#[test]
+fn test_rag_cache_invalidation_lifecycle() {
+    let config = RagConfigBuilder::new()
+        .embedding_dim(3)
+        .semantic_cache(5, 0.90, 3600)
+        .build();
+    let mut engine = RagEngine::new(config);
+
+    engine
+        .add_document(
+            "doc_target",
+            "Initial text content",
+            Some(vec![1.0, 0.0, 0.0]),
+        )
+        .unwrap();
+
+    let query_vec = [1.0, 0.0, 0.0];
+    let res = engine.search("initial text", Some(&query_vec), 1).unwrap();
+    assert_eq!(res[0].doc_id, "doc_target");
+    assert_eq!(engine.cache_stats().0, 0); // 0 hits
+
+    // Query 2: Cache Hit
+    let res2 = engine.search("initial text", Some(&query_vec), 1).unwrap();
+    assert_eq!(res2[0].doc_id, "doc_target");
+    assert_eq!(engine.cache_stats().0, 1); // 1 hit
+
+    // Update document -> cache invalidation
+    engine
+        .add_document(
+            "doc_target",
+            "Updated text content",
+            Some(vec![1.0, 0.0, 0.0]),
+        )
+        .unwrap();
+
+    // Query 3: Should miss cache because invalidated
+    let res3 = engine.search("initial text", Some(&query_vec), 1).unwrap();
+    assert_eq!(res3[0].doc_id, "doc_target");
+    assert_eq!(engine.cache_stats().1, 2); // 2 misses
+
+    // Delete document -> cache invalidation
+    assert!(engine.delete_document("doc_target").unwrap());
+    let res4 = engine.search("initial text", Some(&query_vec), 1).unwrap();
+    assert!(res4.is_empty());
+}

@@ -7,11 +7,13 @@ use crate::rag::cache::SemanticCache;
 use crate::rag::config::RagConfig;
 use crate::rag::dense::DenseIndex;
 use crate::rag::hybrid::{reciprocal_rank_fusion, weighted_linear_fusion, SearchResult};
-use crate::rag::reranker::{rerank_candidates, LexicalSemanticCrossEncoder, RerankResult};
+use crate::rag::reranker::{
+    maximal_marginal_relevance, rerank_candidates, LexicalSemanticCrossEncoder, RerankResult,
+};
 use crate::rag::sparse::SparseIndex;
 use crate::rag::types::{
-    Document, DocumentId, DocumentMetadata, Embedding, FusionStrategy, RagQuery, ScoredDocument,
-    SemanticCacheStats,
+    ChunkingConfig, Document, DocumentId, DocumentMetadata, Embedding, FusionStrategy, RagQuery,
+    ScoredDocument, SemanticCacheStats,
 };
 
 /// Prefix for document raw text in FlashStore KV engine.
@@ -99,6 +101,7 @@ impl RagEngine {
         self.sparse_index.add_document(id.clone(), text);
         self.documents.insert(id.clone(), text.to_string());
         self.metadata.entry(id.clone()).or_default();
+        self.semantic_cache.invalidate_for_doc(&id);
 
         // Optional persistence to FlashStore
         if let Some(ref db) = self.store {
@@ -130,6 +133,7 @@ impl RagEngine {
         self.sparse_index.add_document(id.clone(), &text);
         self.documents.insert(id.clone(), text.clone());
         self.metadata.insert(id.clone(), metadata.clone());
+        self.semantic_cache.invalidate_for_doc(&id);
 
         if let Some(ref db) = self.store {
             let doc_key = [PREFIX_DOC, id.as_bytes()].concat();
@@ -151,12 +155,23 @@ impl RagEngine {
         Ok(())
     }
 
+    /// Decomposes a `Document` into passages according to `chunk_config` and indexes it.
+    pub fn add_document_with_chunks(
+        &mut self,
+        doc: Document,
+        chunk_config: &ChunkingConfig,
+    ) -> Result<()> {
+        let chunked = doc.chunk(chunk_config);
+        self.add_document_model(chunked)
+    }
+
     /// Deletes a document from dense index, sparse index, and document store.
     pub fn delete_document(&mut self, doc_id: &str) -> Result<bool> {
         let removed_dense = self.dense_index.remove(doc_id).is_some();
         let removed_sparse = self.sparse_index.remove_document(doc_id);
         let removed_doc = self.documents.remove(doc_id).is_some();
         let removed_meta = self.metadata.remove(doc_id).is_some();
+        self.semantic_cache.invalidate_for_doc(doc_id);
 
         if let Some(ref db) = self.store {
             let doc_key = [PREFIX_DOC, doc_id.as_bytes()].concat();
@@ -288,6 +303,29 @@ impl RagEngine {
             .collect();
 
         rerank_candidates(&self.cross_encoder, query, &candidates, top_k)
+    }
+
+    /// Selects diverse documents using Maximal Marginal Relevance (MMR).
+    pub fn rerank_mmr(
+        &self,
+        query_embedding: &[f32],
+        hits: &[SearchResult],
+        lambda: f32,
+        top_k: usize,
+    ) -> Vec<RerankResult> {
+        let candidates: Vec<(String, Vec<f32>, f32)> = hits
+            .iter()
+            .map(|hit| {
+                let vec = self
+                    .dense_index
+                    .get(&hit.doc_id)
+                    .cloned()
+                    .unwrap_or_default();
+                (hit.doc_id.clone(), vec, hit.score)
+            })
+            .collect();
+
+        maximal_marginal_relevance(query_embedding, &candidates, lambda, top_k)
     }
 
     /// Cache performance metrics: (hits, misses, hit_rate).
@@ -459,7 +497,38 @@ impl RagEngine {
         }
 
         // 7. Rerank if requested
-        let mut scored_docs: Vec<ScoredDocument> = if query.rerank {
+        let mut scored_docs: Vec<ScoredDocument> = if let Some(lambda) = query.mmr_lambda {
+            let query_emb = query
+                .embedding
+                .as_ref()
+                .map(|e| e.as_slice())
+                .unwrap_or(&[]);
+            let mmr_results = self.rerank_mmr(query_emb, &hits, lambda, query.top_k);
+            let mmr_map: HashMap<String, RerankResult> = mmr_results
+                .into_iter()
+                .map(|r| (r.doc_id.clone(), r))
+                .collect();
+
+            hits.into_iter()
+                .filter_map(|hit| {
+                    if let Some(rr) = mmr_map.get(&hit.doc_id) {
+                        let text = self.documents.get(&hit.doc_id).cloned();
+                        let metadata = self.metadata.get(&hit.doc_id).cloned();
+                        Some(ScoredDocument {
+                            id: DocumentId::new(&hit.doc_id),
+                            score: rr.reranked_score,
+                            dense_score: hit.dense_score,
+                            sparse_score: hit.sparse_score,
+                            text,
+                            metadata,
+                            explanation: None,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else if query.rerank {
             let rerank_k = query.rerank_top_k.unwrap_or(query.top_k);
             let reranked = self.rerank(&query.text, &hits, rerank_k);
             let rank_map: HashMap<String, RerankResult> = reranked
@@ -595,5 +664,101 @@ mod tests {
         let raw_doc = store.get([PREFIX_DOC, b"doc1"].concat()).unwrap();
         assert!(raw_doc.is_some());
         assert_eq!(raw_doc.unwrap(), b"rust storage engine".as_slice());
+    }
+
+    #[test]
+    fn test_rag_engine_cache_invalidation_on_delete_and_update() {
+        let config = RagConfig {
+            embedding_dim: 3,
+            ..Default::default()
+        };
+        let mut engine = RagEngine::new(config);
+
+        engine
+            .add_document("doc1", "first version text", Some(vec![1.0, 0.0, 0.0]))
+            .unwrap();
+
+        // Search populates cache
+        let hits = engine
+            .search("version text", Some(&[1.0, 0.0, 0.0]), 1)
+            .unwrap();
+        assert_eq!(hits[0].doc_id, "doc1");
+        assert_eq!(engine.cache_stats().1, 1); // 1 miss
+
+        // Repeat search hits cache
+        let hits2 = engine
+            .search("version text", Some(&[1.0, 0.0, 0.0]), 1)
+            .unwrap();
+        assert_eq!(hits2[0].doc_id, "doc1");
+        assert_eq!(engine.cache_stats().0, 1); // 1 hit
+
+        // Updating doc1 invalidates cache
+        engine
+            .add_document("doc1", "updated version text", Some(vec![1.0, 0.0, 0.0]))
+            .unwrap();
+
+        // Next search should miss cache because it was invalidated
+        let _ = engine
+            .search("version text", Some(&[1.0, 0.0, 0.0]), 1)
+            .unwrap();
+        assert_eq!(engine.cache_stats().1, 2); // 2 misses now!
+
+        // Deleting doc1 also invalidates cache
+        engine.delete_document("doc1").unwrap();
+        assert_eq!(engine.doc_count(), 0);
+    }
+
+    #[test]
+    fn test_rag_engine_mmr_rerank() {
+        use crate::rag::types::ChunkingStrategy;
+
+        let config = RagConfig {
+            embedding_dim: 3,
+            ..Default::default()
+        };
+        let mut engine = RagEngine::new(config);
+
+        // doc1 and doc2 are almost identical, doc3 is diverse
+        engine
+            .add_document("doc1", "storage engine indexing", Some(vec![1.0, 0.0, 0.0]))
+            .unwrap();
+        engine
+            .add_document(
+                "doc2",
+                "storage engine indexing fast",
+                Some(vec![0.99, 0.01, 0.0]),
+            )
+            .unwrap();
+        engine
+            .add_document(
+                "doc3",
+                "distributed network consensus",
+                Some(vec![0.0, 1.0, 0.0]),
+            )
+            .unwrap();
+
+        let query = RagQuery::builder("storage distributed")
+            .embedding(vec![1.0, 0.0, 0.0])
+            .top_k(2)
+            .mmr(0.3)
+            .build();
+
+        let results = engine.search_query(&query).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id.as_str(), "doc1");
+        assert_eq!(results[1].id.as_str(), "doc3");
+
+        // Document chunking integration
+        let chunk_config = ChunkingConfig {
+            strategy: ChunkingStrategy::FixedTokens {
+                size: 2,
+                overlap: 0,
+            },
+            min_chunk_size: 2,
+        };
+        let doc = Document::new("chunk_doc", "one two three four five six");
+        engine.add_document_with_chunks(doc, &chunk_config).unwrap();
+        let loaded = engine.get_document("chunk_doc").unwrap();
+        assert_eq!(loaded.id.as_str(), "chunk_doc");
     }
 }
