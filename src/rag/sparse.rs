@@ -80,6 +80,11 @@ impl SparseIndex {
         self.doc_lengths.is_empty()
     }
 
+    /// Number of distinct vocabulary terms indexed.
+    pub fn term_count(&self) -> usize {
+        self.postings.len()
+    }
+
     /// Average document length across the collection.
     pub fn avg_dl(&self) -> f32 {
         if self.doc_lengths.is_empty() {

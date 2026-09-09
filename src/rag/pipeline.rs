@@ -234,6 +234,37 @@ impl RagPipeline {
         &mut self.engine
     }
 
+    /// Returns all indexed document IDs in sorted order.
+    pub fn document_ids(&self) -> Vec<String> {
+        self.engine.document_ids()
+    }
+
+    /// Retrieves a document by ID.
+    pub fn get_document(&self, doc_id: &str) -> Option<Document> {
+        self.engine.get_document(doc_id)
+    }
+
+    /// Deletes a document by ID.
+    pub fn delete_document(&mut self, doc_id: &str) -> Result<bool> {
+        self.engine.delete_document(doc_id)
+    }
+
+    /// Lists all indexed documents.
+    pub fn list_documents(&self) -> Vec<Document> {
+        let mut docs = Vec::new();
+        for id in self.engine.document_ids() {
+            if let Some(doc) = self.engine.get_document(&id) {
+                docs.push(doc);
+            }
+        }
+        docs
+    }
+
+    /// Clears the semantic vector query cache.
+    pub fn clear_cache(&mut self) {
+        self.engine.clear_cache();
+    }
+
     /// Ingests a raw text document, automatically chunking and embedding if configured.
     pub fn ingest_text(
         &mut self,

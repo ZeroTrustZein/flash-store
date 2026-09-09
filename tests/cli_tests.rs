@@ -2,7 +2,7 @@ use bytes::Bytes;
 use flash_store::cli::batch_parser::{parse_json_ops, parse_plain_lines};
 use flash_store::cli::formatter::{format_kv_pairs, format_stats};
 use flash_store::cli::repl::{execute_repl_command, tokenize_line};
-use flash_store::cli::{open_db, run, Cmd, GlobalOpts, OutputFormat};
+use flash_store::cli::{open_db, open_rag_pipeline, run, Cmd, GlobalOpts, OutputFormat, RagCmd};
 use flash_store::config::OptionsBuilder;
 use flash_store::engine::{FlashStore, Stats};
 use flash_store::error::Result;

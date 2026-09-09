@@ -112,6 +112,28 @@ impl RagEngine {
         self.documents.len()
     }
 
+    /// Total number of dense vectors indexed.
+    pub fn dense_vector_count(&self) -> usize {
+        self.dense_index.len()
+    }
+
+    /// Total number of sparse vocabulary terms indexed.
+    pub fn sparse_term_count(&self) -> usize {
+        self.sparse_index.term_count()
+    }
+
+    /// Returns all indexed document IDs in sorted order.
+    pub fn document_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.documents.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Clears the semantic vector query cache.
+    pub fn clear_cache(&mut self) {
+        self.semantic_cache.clear();
+    }
+
     /// Retrieves document text by doc_id.
     pub fn get_document_text(&self, doc_id: &str) -> Option<&str> {
         self.documents.get(doc_id).map(|s| s.as_str())
@@ -204,6 +226,11 @@ impl RagEngine {
 
     /// Retrieves a document by id as a domain model.
     pub fn get_document(&self, doc_id: &str) -> Option<Document> {
+        if let Some(ref adapter) = self.store_adapter {
+            if let Ok(Some(doc)) = adapter.load_document(doc_id) {
+                return Some(doc);
+            }
+        }
         let text = self.documents.get(doc_id)?;
         let metadata = self.metadata.get(doc_id).cloned().unwrap_or_default();
         let embedding = self
