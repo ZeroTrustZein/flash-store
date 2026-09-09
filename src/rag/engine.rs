@@ -1,27 +1,26 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::engine::FlashStore;
 use crate::error::Result;
 use crate::rag::cache::SemanticCache;
 use crate::rag::config::RagConfig;
+use crate::rag::context::{AssembledContext, ContextAssembler, ContextConfig};
 use crate::rag::dense::DenseIndex;
 use crate::rag::hybrid::{reciprocal_rank_fusion, weighted_linear_fusion, SearchResult};
+use crate::rag::metrics::{RagMetricsSnapshot, RagMetricsTracker};
 use crate::rag::reranker::{
     maximal_marginal_relevance, rerank_candidates, LexicalSemanticCrossEncoder, RerankResult,
 };
 use crate::rag::sparse::SparseIndex;
+pub use crate::rag::store::{
+    RagStoreAdapter, PREFIX_CHUNK, PREFIX_DOC, PREFIX_META, PREFIX_SYS, PREFIX_VEC,
+};
 use crate::rag::types::{
     ChunkingConfig, Document, DocumentId, DocumentMetadata, Embedding, FusionStrategy, RagQuery,
     ScoredDocument, SemanticCacheStats,
 };
-
-/// Prefix for document raw text in FlashStore KV engine.
-pub const PREFIX_DOC: &[u8] = b"rag:doc:";
-/// Prefix for document vector embeddings in FlashStore KV engine.
-pub const PREFIX_VEC: &[u8] = b"rag:vec:";
-/// Prefix for document metadata in FlashStore KV engine.
-pub const PREFIX_META: &[u8] = b"rag:meta:";
 
 /// Unified RAG retrieval engine providing hybrid dense-sparse search,
 /// cross-encoder reranking, and semantic query caching with FlashStore integration.
@@ -37,6 +36,10 @@ pub struct RagEngine {
     metadata: HashMap<String, DocumentMetadata>,
     /// Optional underlying persistent FlashStore KV engine.
     store: Option<Arc<FlashStore>>,
+    /// Storage adapter handling atomic WriteBatch and recovery.
+    store_adapter: Option<RagStoreAdapter>,
+    /// Telemetry metrics tracker across retrieval stages.
+    metrics: Arc<RagMetricsTracker>,
 }
 
 impl RagEngine {
@@ -60,14 +63,43 @@ impl RagEngine {
             documents: HashMap::new(),
             metadata: HashMap::new(),
             store: None,
+            store_adapter: None,
+            metrics: Arc::new(RagMetricsTracker::new()),
         }
     }
 
     /// Creates a `RagEngine` backed by a persistent `FlashStore` key-value engine.
     pub fn with_store(config: RagConfig, store: Arc<FlashStore>) -> Self {
         let mut engine = Self::new(config);
-        engine.store = Some(store);
+        engine.store = Some(store.clone());
+        engine.store_adapter = Some(RagStoreAdapter::new(store));
         engine
+    }
+
+    /// Recovers a `RagEngine` by scanning and rehydrating all indexed documents,
+    /// embeddings, metadata, and chunks stored in the persistent `FlashStore`.
+    pub fn recover(config: RagConfig, store: Arc<FlashStore>) -> Result<Self> {
+        let adapter = RagStoreAdapter::new(store.clone());
+        let docs = adapter.recover_all()?;
+        let mut engine = Self::with_store(config, store);
+        for doc in docs {
+            engine.index_in_memory(&doc)?;
+        }
+        Ok(engine)
+    }
+
+    /// Internal helper to index document into in-memory structures without writing to FlashStore.
+    fn index_in_memory(&mut self, doc: &Document) -> Result<()> {
+        let id_str = doc.id.to_string();
+        if let Some(ref emb) = doc.embedding {
+            self.dense_index
+                .insert(id_str.clone(), emb.as_slice().to_vec())?;
+        }
+        self.sparse_index.add_document(id_str.clone(), &doc.text);
+        self.documents.insert(id_str.clone(), doc.text.clone());
+        self.metadata.insert(id_str.clone(), doc.metadata.clone());
+        self.semantic_cache.invalidate_for_doc(&id_str);
+        Ok(())
     }
 
     /// Access the configuration.
@@ -85,6 +117,25 @@ impl RagEngine {
         self.documents.get(doc_id).map(|s| s.as_str())
     }
 
+    /// Returns a telemetry snapshot of retrieval subsystem metrics.
+    pub fn metrics(&self) -> RagMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// Access the underlying store adapter if store is attached.
+    pub fn store_adapter(&self) -> Option<&RagStoreAdapter> {
+        self.store_adapter.as_ref()
+    }
+
+    /// Assembles context block for retrieved documents using the context assembly subsystem.
+    pub fn assemble_context(
+        &self,
+        hits: &[ScoredDocument],
+        config: &ContextConfig,
+    ) -> AssembledContext {
+        ContextAssembler::assemble(hits, config)
+    }
+
     /// Indexes a document with text and optional dense vector embedding.
     pub fn add_document(
         &mut self,
@@ -92,66 +143,37 @@ impl RagEngine {
         text: &str,
         embedding: Option<Vec<f32>>,
     ) -> Result<()> {
-        let id = doc_id.into();
+        let doc = Document {
+            id: DocumentId::new(doc_id),
+            text: text.to_string(),
+            embedding: embedding.map(Embedding::new),
+            metadata: DocumentMetadata::default(),
+            chunks: Vec::new(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        self.add_document_model(doc)
+    }
 
-        if let Some(ref emb) = embedding {
-            self.dense_index.insert(id.clone(), emb.clone())?;
-        }
+    /// Indexes a complete `Document` domain model with text, embedding, and metadata.
+    pub fn add_document_model(&mut self, doc: Document) -> Result<()> {
+        self.index_in_memory(&doc)?;
 
-        self.sparse_index.add_document(id.clone(), text);
-        self.documents.insert(id.clone(), text.to_string());
-        self.metadata.entry(id.clone()).or_default();
-        self.semantic_cache.invalidate_for_doc(&id);
-
-        // Optional persistence to FlashStore
-        if let Some(ref db) = self.store {
-            let doc_key = [PREFIX_DOC, id.as_bytes()].concat();
-            db.put(doc_key, text.as_bytes())?;
-
-            if let Some(ref emb) = embedding {
-                let vec_key = [PREFIX_VEC, id.as_bytes()].concat();
-                let encoded = bincode::serialize(emb)?;
-                db.put(vec_key, encoded)?;
-            }
+        if let Some(ref adapter) = self.store_adapter {
+            adapter.persist_document(&doc)?;
         }
 
         Ok(())
     }
 
-    /// Indexes a complete `Document` domain model with text, embedding, and metadata.
-    pub fn add_document_model(&mut self, doc: Document) -> Result<()> {
-        let id = doc.id.to_string();
-        let text = doc.text;
-        let embedding = doc.embedding;
-        let metadata = doc.metadata;
-
-        if let Some(ref emb) = embedding {
-            self.dense_index
-                .insert(id.clone(), emb.as_slice().to_vec())?;
+    /// Atomically persists and indexes a batch of documents into memory and FlashStore.
+    pub fn batch_add_documents(&mut self, docs: &[Document]) -> Result<()> {
+        for doc in docs {
+            self.index_in_memory(doc)?;
         }
-
-        self.sparse_index.add_document(id.clone(), &text);
-        self.documents.insert(id.clone(), text.clone());
-        self.metadata.insert(id.clone(), metadata.clone());
-        self.semantic_cache.invalidate_for_doc(&id);
-
-        if let Some(ref db) = self.store {
-            let doc_key = [PREFIX_DOC, id.as_bytes()].concat();
-            db.put(doc_key, text.as_bytes())?;
-
-            if let Some(ref emb) = embedding {
-                let vec_key = [PREFIX_VEC, id.as_bytes()].concat();
-                let encoded = bincode::serialize(emb.as_slice())?;
-                db.put(vec_key, encoded)?;
-            }
-
-            if !metadata.is_empty() {
-                let meta_key = [PREFIX_META, id.as_bytes()].concat();
-                let encoded_meta = serde_json::to_vec(&metadata)?;
-                db.put(meta_key, encoded_meta)?;
-            }
+        if let Some(ref adapter) = self.store_adapter {
+            adapter.persist_documents_batch(docs)?;
         }
-
         Ok(())
     }
 
@@ -173,13 +195,8 @@ impl RagEngine {
         let removed_meta = self.metadata.remove(doc_id).is_some();
         self.semantic_cache.invalidate_for_doc(doc_id);
 
-        if let Some(ref db) = self.store {
-            let doc_key = [PREFIX_DOC, doc_id.as_bytes()].concat();
-            db.delete(doc_key)?;
-            let vec_key = [PREFIX_VEC, doc_id.as_bytes()].concat();
-            db.delete(vec_key)?;
-            let meta_key = [PREFIX_META, doc_id.as_bytes()].concat();
-            db.delete(meta_key)?;
+        if let Some(ref adapter) = self.store_adapter {
+            let _ = adapter.delete_document(doc_id)?;
         }
 
         Ok(removed_dense || removed_sparse || removed_doc || removed_meta)
@@ -222,30 +239,44 @@ impl RagEngine {
         query_embedding: Option<&[f32]>,
         top_k: usize,
     ) -> Result<Vec<SearchResult>> {
+        let start = Instant::now();
+        self.metrics
+            .total_searches
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         if top_k == 0 {
+            self.metrics.search_latency.record(start.elapsed());
             return Ok(Vec::new());
         }
 
         // 1. Semantic Cache check
         if let Some(emb) = query_embedding {
-            if let Some(cached) = self.semantic_cache.lookup(emb) {
-                let mut hits = cached;
+            let cached_opt = self.semantic_cache.lookup(emb);
+            self.metrics.record_cache_lookup(cached_opt.is_some());
+            if let Some(mut hits) = cached_opt {
                 hits.truncate(top_k);
+                self.metrics.search_latency.record(start.elapsed());
                 return Ok(hits);
             }
         }
 
         // 2. Sparse retrieval
+        let t_sparse = Instant::now();
         let sparse_hits = self.sparse_index.search(query, top_k * 2)?;
+        self.metrics.sparse_latency.record(t_sparse.elapsed());
 
         // 3. Dense retrieval
+        let t_dense = Instant::now();
         let dense_hits = if let Some(emb) = query_embedding {
-            self.dense_index.search(emb, top_k * 2)?
+            let hits = self.dense_index.search(emb, top_k * 2)?;
+            self.metrics.dense_latency.record(t_dense.elapsed());
+            hits
         } else {
             Vec::new()
         };
 
         // 4. Hybrid fusion
+        let t_fusion = Instant::now();
         let hits = if !dense_hits.is_empty() && !sparse_hits.is_empty() {
             if self.config.rrf_k > 0 {
                 reciprocal_rank_fusion(&dense_hits, &sparse_hits, self.config.rrf_k, top_k)
@@ -280,6 +311,7 @@ impl RagEngine {
                 })
                 .collect()
         };
+        self.metrics.fusion_latency.record(t_fusion.elapsed());
 
         // 5. Populate semantic cache
         if let Some(emb) = query_embedding {
@@ -288,11 +320,13 @@ impl RagEngine {
                 .insert(query, emb.to_vec(), hits.clone());
         }
 
+        self.metrics.search_latency.record(start.elapsed());
         Ok(hits)
     }
 
     /// Reranks search results using the cross-encoder scoring model.
     pub fn rerank(&self, query: &str, hits: &[SearchResult], top_k: usize) -> Vec<RerankResult> {
+        let t_rerank = Instant::now();
         let candidates: Vec<(String, String, f32)> = hits
             .iter()
             .filter_map(|hit| {
@@ -302,7 +336,9 @@ impl RagEngine {
             })
             .collect();
 
-        rerank_candidates(&self.cross_encoder, query, &candidates, top_k)
+        let results = rerank_candidates(&self.cross_encoder, query, &candidates, top_k);
+        self.metrics.rerank_latency.record(t_rerank.elapsed());
+        results
     }
 
     /// Selects diverse documents using Maximal Marginal Relevance (MMR).
@@ -350,14 +386,22 @@ impl RagEngine {
 
     /// Executes a structured `RagQuery`, returning rich `ScoredDocument` domain models.
     pub fn search_query(&mut self, query: &RagQuery) -> Result<Vec<ScoredDocument>> {
+        let start = Instant::now();
+        self.metrics
+            .total_searches
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         if query.top_k == 0 {
+            self.metrics.search_latency.record(start.elapsed());
             return Ok(Vec::new());
         }
 
         // 1. Semantic cache lookup if embedding is provided and no metadata filter is active
         if query.filter.is_none() {
             if let Some(ref emb) = query.embedding {
-                if let Some(cached_hits) = self.semantic_cache.lookup(emb.as_slice()) {
+                let cached_lookup = self.semantic_cache.lookup(emb.as_slice());
+                self.metrics.record_cache_lookup(cached_lookup.is_some());
+                if let Some(cached_hits) = cached_lookup {
                     let mut results: Vec<ScoredDocument> = cached_hits
                         .into_iter()
                         .take(query.top_k)
@@ -373,6 +417,7 @@ impl RagEngine {
                     if let Some(min_score) = query.min_score {
                         results.retain(|r| r.score >= min_score);
                     }
+                    self.metrics.search_latency.record(start.elapsed());
                     return Ok(results);
                 }
             }
@@ -584,6 +629,7 @@ impl RagEngine {
         }
 
         scored_docs.truncate(query.top_k);
+        self.metrics.search_latency.record(start.elapsed());
         Ok(scored_docs)
     }
 }
@@ -760,5 +806,56 @@ mod tests {
         engine.add_document_with_chunks(doc, &chunk_config).unwrap();
         let loaded = engine.get_document("chunk_doc").unwrap();
         assert_eq!(loaded.id.as_str(), "chunk_doc");
+    }
+
+    #[test]
+    fn test_rag_engine_recovery_from_flashstore() {
+        let dir = tempdir().unwrap();
+        let options = OptionsBuilder::new().dir(dir.path()).build();
+        let store = Arc::new(FlashStore::open(options).unwrap());
+
+        let config = RagConfig {
+            embedding_dim: 2,
+            ..Default::default()
+        };
+
+        // Populate with first engine instance
+        {
+            let mut engine = RagEngine::with_store(config.clone(), store.clone());
+            let doc1 = Document::builder("docA", "First persistent systems recovery document")
+                .embedding(vec![1.0, 0.0])
+                .metadata_field("topic", "systems")
+                .build();
+            let doc2 = Document::builder("docB", "Second persistent algorithms recovery document")
+                .embedding(vec![0.0, 1.0])
+                .metadata_field("topic", "algorithms")
+                .build();
+
+            engine.batch_add_documents(&[doc1, doc2]).unwrap();
+            assert_eq!(engine.doc_count(), 2);
+        }
+
+        // Recover in a fresh engine instance
+        let mut recovered_engine = RagEngine::recover(config, store).unwrap();
+        assert_eq!(recovered_engine.doc_count(), 2);
+
+        let hits = recovered_engine
+            .search("systems recovery", Some(&[1.0, 0.0]), 1)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].doc_id, "docA");
+
+        // Metrics verification
+        let metrics = recovered_engine.metrics();
+        assert_eq!(metrics.total_searches, 1);
+        assert!(metrics.search_latency.count >= 1);
+
+        // Context assembly verification
+        let query = RagQuery::builder("systems").top_k(1).build();
+        let scored = recovered_engine.search_query(&query).unwrap();
+        let ctx_cfg = ContextConfig::default();
+        let assembled = recovered_engine.assemble_context(&scored, &ctx_cfg);
+        assert_eq!(assembled.doc_count, 1);
+        assert!(assembled.text.contains("docA"));
     }
 }

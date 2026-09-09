@@ -483,3 +483,262 @@ fn test_rag_cache_invalidation_lifecycle() {
     let res4 = engine.search("initial text", Some(&query_vec), 1).unwrap();
     assert!(res4.is_empty());
 }
+
+#[test]
+fn test_subsystems_store_adapter_batch_atomic_operations() {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(options).unwrap());
+    let adapter = RagStoreAdapter::new(store.clone());
+
+    let mut meta = DocumentMetadata::new();
+    meta.insert("author", "Zein");
+    meta.insert("version", 2i64);
+
+    let chunk = DocumentChunk {
+        chunk_id: "doc_sub_0".to_string(),
+        doc_id: DocumentId::new("doc_sub"),
+        chunk_index: 0,
+        text: "Passage 1 content".to_string(),
+        embedding: Some(Embedding::new(vec![0.5, 0.5])),
+        start_char: 0,
+        end_char: 17,
+        metadata: DocumentMetadata::new(),
+    };
+
+    let doc = Document::builder("doc_sub", "Complete document content for subsystems test")
+        .embedding(vec![0.3, 0.4])
+        .metadata(meta)
+        .chunks(vec![chunk])
+        .build();
+
+    // Atomic persist
+    adapter.persist_document(&doc).unwrap();
+
+    // Verify raw keys in FlashStore
+    assert!(store.get(b"rag:doc:doc_sub").unwrap().is_some());
+    assert!(store.get(b"rag:vec:doc_sub").unwrap().is_some());
+    assert!(store.get(b"rag:meta:doc_sub").unwrap().is_some());
+    assert!(store.get(b"rag:chunk:doc_sub:0").unwrap().is_some());
+
+    // Load via adapter
+    let loaded = adapter.load_document("doc_sub").unwrap().unwrap();
+    assert_eq!(loaded.id.as_str(), "doc_sub");
+    assert_eq!(loaded.text, "Complete document content for subsystems test");
+    assert_eq!(loaded.embedding.unwrap().as_slice(), &[0.3, 0.4]);
+    assert_eq!(loaded.metadata.get_string("author"), Some("Zein"));
+    assert_eq!(loaded.chunks.len(), 1);
+    assert_eq!(loaded.chunks[0].chunk_id, "doc_sub_0");
+
+    // Recover all
+    let all = adapter.recover_all().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].id.as_str(), "doc_sub");
+
+    // Atomic delete
+    assert!(adapter.delete_document("doc_sub").unwrap());
+    assert!(store.get(b"rag:doc:doc_sub").unwrap().is_none());
+    assert!(store.get(b"rag:vec:doc_sub").unwrap().is_none());
+    assert!(store.get(b"rag:meta:doc_sub").unwrap().is_none());
+    assert!(store.get(b"rag:chunk:doc_sub:0").unwrap().is_none());
+}
+
+#[test]
+fn test_subsystems_rag_engine_full_recovery_and_query_continuity() {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(options).unwrap());
+
+    let config = RagConfigBuilder::new()
+        .embedding_dim(3)
+        .similarity_metric(SimilarityMetric::Cosine)
+        .build();
+
+    // 1. Ingest via engine 1
+    {
+        let mut engine = RagEngine::with_store(config.clone(), store.clone());
+        let doc1 = Document::builder("doc1", "FlashStore LSM-tree engine storage subsystem")
+            .embedding(vec![1.0, 0.0, 0.0])
+            .metadata_field("category", "database")
+            .build();
+        let doc2 = Document::builder("doc2", "Distributed consensus raft protocol")
+            .embedding(vec![0.0, 1.0, 0.0])
+            .metadata_field("category", "networking")
+            .build();
+        let doc3 = Document::builder("doc3", "Semantic query caching and vector retrieval")
+            .embedding(vec![0.7, 0.7, 0.0])
+            .metadata_field("category", "ai")
+            .build();
+
+        engine.batch_add_documents(&[doc1, doc2, doc3]).unwrap();
+        assert_eq!(engine.doc_count(), 3);
+    }
+
+    // 2. Recover into a brand new engine instance from the store
+    let mut recovered = RagEngine::recover(config, store).unwrap();
+    assert_eq!(recovered.doc_count(), 3);
+
+    // Verify sparse search works on recovered index
+    let sparse_hits = recovered.search("LSM-tree storage", None, 1).unwrap();
+    assert_eq!(sparse_hits.len(), 1);
+    assert_eq!(sparse_hits[0].doc_id, "doc1");
+
+    // Verify dense vector search works on recovered index
+    let dense_hits = recovered
+        .search("consensus", Some(&[0.0, 1.0, 0.0]), 1)
+        .unwrap();
+    assert_eq!(dense_hits.len(), 1);
+    assert_eq!(dense_hits[0].doc_id, "doc2");
+
+    // Verify structured query with metadata filter works
+    let query = RagQuery::builder("retrieval")
+        .embedding(vec![0.7, 0.7, 0.0])
+        .filter(MetadataFilter::condition(FilterCondition::Eq(
+            "category".to_string(),
+            "ai".into(),
+        )))
+        .top_k(1)
+        .build();
+
+    let query_hits = recovered.search_query(&query).unwrap();
+    assert_eq!(query_hits.len(), 1);
+    assert_eq!(query_hits[0].id.as_str(), "doc3");
+
+    // Verify telemetry metrics tracker on recovered engine
+    let snap = recovered.metrics();
+    assert_eq!(snap.total_searches, 3);
+}
+
+#[test]
+fn test_subsystems_context_assembler_citations_and_prompt_template() {
+    let mut meta1 = DocumentMetadata::new();
+    meta1.insert("source", "docs/architecture.md");
+    meta1.insert("category", "core");
+
+    let mut meta2 = DocumentMetadata::new();
+    meta2.insert("source", "docs/wal.md");
+
+    let docs = vec![
+        ScoredDocument {
+            id: DocumentId::new("doc_arch"),
+            score: 0.945,
+            dense_score: Some(0.95),
+            sparse_score: Some(0.94),
+            text: Some("LSM architecture uses memtables and immutable SSTables.".to_string()),
+            metadata: Some(meta1),
+            explanation: None,
+        },
+        ScoredDocument {
+            id: DocumentId::new("doc_wal"),
+            score: 0.812,
+            dense_score: Some(0.80),
+            sparse_score: Some(0.82),
+            text: Some("Write-ahead logs guarantee zero data loss on crashes.".to_string()),
+            metadata: Some(meta2),
+            explanation: None,
+        },
+    ];
+
+    // Markdown assembly
+    let md_config = ContextConfig::new()
+        .format(ContextFormat::Markdown)
+        .include_scores(true)
+        .include_metadata(true)
+        .header("### Context for question");
+
+    let md_context = ContextAssembler::assemble(&docs, &md_config);
+    assert_eq!(md_context.doc_count, 2);
+    assert_eq!(md_context.citations.len(), 2);
+    assert_eq!(md_context.citations[0].doc_id, "doc_arch");
+    assert_eq!(
+        md_context.citations[0].source,
+        Some("docs/architecture.md".to_string())
+    );
+    assert!(md_context.text.contains("### [1] doc_arch"));
+    assert!(md_context.text.contains("source: docs/architecture.md"));
+
+    // Prompt template formatting
+    let template = RagPromptTemplate::new("You are an expert storage engineer.");
+    let prompt = template.format_prompt("How does FlashStore persist data?", &md_context);
+    assert!(prompt.starts_with("You are an expert storage engineer."));
+    assert!(prompt.contains("Context for question"));
+    assert!(prompt.contains("User Query: How does FlashStore persist data?"));
+
+    // Numbered format
+    let num_config = ContextConfig::new()
+        .format(ContextFormat::Numbered)
+        .without_header();
+    let num_context = ContextAssembler::assemble(&docs, &num_config);
+    assert!(num_context.text.starts_with("[1] (doc_arch)"));
+}
+
+#[test]
+fn test_subsystems_rag_pipeline_with_mock_embedder_and_chunking() {
+    let config = RagConfigBuilder::new().embedding_dim(16).build();
+    let engine = RagEngine::new(config);
+    let embedder = Arc::new(MockEmbeddingProvider::new(16));
+
+    let chunk_cfg = ChunkingConfig {
+        strategy: ChunkingStrategy::FixedTokens { size: 4, overlap: 1 },
+        min_chunk_size: 2,
+    };
+
+    let mut pipeline = RagPipeline::new(engine)
+        .with_embedder(embedder)
+        .with_chunking(chunk_cfg);
+
+    let report = pipeline
+        .batch_ingest(vec![
+            (
+                "p1".into(),
+                "FlashStore is a lightning fast embedded storage engine in Rust".into(),
+                None,
+            ),
+            (
+                "p2".into(),
+                "Distributed transactions require two-phase commit consensus".into(),
+                None,
+            ),
+        ])
+        .unwrap();
+
+    assert_eq!(report.docs_ingested, 2);
+    assert!(report.chunks_created >= 2);
+    assert!(report.total_chars > 0);
+
+    let res = pipeline.query("embedded storage engine", 2).unwrap();
+    assert!(!res.documents.is_empty());
+    assert_eq!(res.documents[0].id.as_str(), "p1");
+    assert!(res.prompt.contains("FlashStore"));
+    assert_eq!(res.context.citations[0].doc_id, "p1");
+}
+
+#[test]
+fn test_subsystems_telemetry_metrics_and_ir_evaluation() {
+    let samples = vec![
+        QueryEvaluationSample {
+            query: "lsm tree".into(),
+            retrieved_ids: vec!["docA".into(), "docB".into(), "docC".into()],
+            ground_truth_ids: vec!["docA".into()], // Rank 1 -> RR = 1.0, Hit = 1
+        },
+        QueryEvaluationSample {
+            query: "compaction".into(),
+            retrieved_ids: vec!["docX".into(), "docB".into(), "docY".into()],
+            ground_truth_ids: vec!["docB".into()], // Rank 2 -> RR = 0.5, Hit = 1
+        },
+        QueryEvaluationSample {
+            query: "bloom filter".into(),
+            retrieved_ids: vec!["docZ".into(), "docW".into()],
+            ground_truth_ids: vec!["docC".into()], // Not in top 2 -> RR = 0.0, Hit = 0
+        },
+    ];
+
+    let summary = RetrievalEvaluator::evaluate(&samples, 2);
+    assert_eq!(summary.sample_count, 3);
+    assert_eq!(summary.k, 2);
+    assert!((summary.mrr - 0.5).abs() < 1e-4);
+    assert!((summary.hit_rate_at_k - (2.0 / 3.0)).abs() < 1e-4);
+    assert!(summary.ndcg_at_k > 0.0);
+    assert!(summary.precision_at_k > 0.0);
+    assert!(summary.recall_at_k > 0.0);
+}
