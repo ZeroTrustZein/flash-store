@@ -493,3 +493,455 @@ fn test_global_opts_and_custom_options() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_cli_rag_ingest_and_query_lifecycle() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Ingest document via CLI
+    run(
+        Cmd::Rag {
+            command: RagCmd::Ingest {
+                id: Some("rag_doc_1".into()),
+                text: Some("FlashStore is a thread-safe embedded LSM-Tree key-value database in Rust.".into()),
+                file: None,
+                batch_file: None,
+                title: Some("FlashStore Architecture".into()),
+                author: Some("Zein".into()),
+                tags: Some("database,rust,storage".into()),
+                metadata: vec!["tier=engine".into(), "year=2026".into()],
+                chunk_size: Some(100),
+                chunk_overlap: Some(20),
+                chunk_strategy: "paragraphs".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 2. Verify document in pipeline
+    let pipeline = open_rag_pipeline(&opts)?;
+    let doc = pipeline.get_document("rag_doc_1");
+    assert!(doc.is_some());
+    assert_eq!(doc.as_ref().unwrap().metadata.get_string("author"), Some("Zein"));
+
+    // 3. Get document via CLI Get in text and json
+    run(
+        Cmd::Rag {
+            command: RagCmd::Get {
+                id: Some("rag_doc_1".into()),
+                doc_id: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::Get {
+                id: None,
+                doc_id: Some("rag_doc_1".into()),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 4. Query in text, JSON, and TSV
+    run(
+        Cmd::Rag {
+            command: RagCmd::Query {
+                query: Some("embedded database LSM".into()),
+                query_flag: None,
+                top_k: 5,
+                dense_weight: Some(0.5),
+                sparse_weight: Some(0.5),
+                fusion: "linear".into(),
+                no_rerank: false,
+                mmr: false,
+                mmr_lambda: 0.7,
+                min_score: None,
+                filters: vec!["author=Zein".into()],
+                format: "text".into(),
+                prompt: false,
+                explain: true,
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::Query {
+                query: None,
+                query_flag: Some("database".into()),
+                top_k: 2,
+                dense_weight: None,
+                sparse_weight: None,
+                fusion: "rrf".into(),
+                no_rerank: true,
+                mmr: false,
+                mmr_lambda: 0.7,
+                min_score: None,
+                filters: Vec::new(),
+                format: "json".into(),
+                prompt: false,
+                explain: false,
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::Query {
+                query: Some("thread-safe storage".into()),
+                query_flag: None,
+                top_k: 2,
+                dense_weight: None,
+                sparse_weight: None,
+                fusion: "dense".into(),
+                no_rerank: false,
+                mmr: true,
+                mmr_lambda: 0.8,
+                min_score: None,
+                filters: Vec::new(),
+                format: "tsv".into(),
+                prompt: false,
+                explain: false,
+            },
+        },
+        &opts,
+    )?;
+
+    // 5. Query with prompt generation
+    run(
+        Cmd::Rag {
+            command: RagCmd::Query {
+                query: Some("How does FlashStore work?".into()),
+                query_flag: None,
+                top_k: 3,
+                dense_weight: None,
+                sparse_weight: None,
+                fusion: "linear".into(),
+                no_rerank: false,
+                mmr: false,
+                mmr_lambda: 0.7,
+                min_score: None,
+                filters: Vec::new(),
+                format: "prompt".into(),
+                prompt: true,
+                explain: false,
+            },
+        },
+        &opts,
+    )?;
+
+    // 6. Delete document via CLI
+    run(
+        Cmd::Rag {
+            command: RagCmd::Delete {
+                id: Some("rag_doc_1".into()),
+                doc_id: None,
+            },
+        },
+        &opts,
+    )?;
+
+    let pipeline_after = open_rag_pipeline(&opts)?;
+    assert!(pipeline_after.get_document("rag_doc_1").is_none());
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_rag_batch_ingest_and_list() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // Create a batch JSON file
+    let batch_file_path = dir.path().join("batch_documents.json");
+    let batch_json = r#"[
+        {
+            "id": "doc_b1",
+            "text": "First batch document about distributed file systems.",
+            "title": "DFS Overview",
+            "author": "Alice"
+        },
+        {
+            "id": "doc_b2",
+            "text": "Second batch document about vector databases and HNSW indexing.",
+            "title": "Vector Search",
+            "author": "Bob"
+        }
+    ]"#;
+    fs::write(&batch_file_path, batch_json)?;
+
+    // Ingest batch file via CLI
+    run(
+        Cmd::Rag {
+            command: RagCmd::Ingest {
+                id: None,
+                text: None,
+                file: None,
+                batch_file: Some(batch_file_path),
+                title: None,
+                author: None,
+                tags: None,
+                metadata: Vec::new(),
+                chunk_size: Some(100),
+                chunk_overlap: Some(10),
+                chunk_strategy: "chars".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // List documents in all formats
+    run(
+        Cmd::Rag {
+            command: RagCmd::List {
+                limit: 10,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::List {
+                limit: 10,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::List {
+                limit: 10,
+                format: "tsv".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // Stats in all formats
+    run(
+        Cmd::Rag {
+            command: RagCmd::Stats {
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Rag {
+            command: RagCmd::Stats {
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // Clear Cache
+    run(
+        Cmd::Rag {
+            command: RagCmd::ClearCache,
+        },
+        &opts,
+    )?;
+
+    // Eval
+    run(
+        Cmd::Rag {
+            command: RagCmd::Eval {
+                samples_file: None,
+                k: 2,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    Ok(())
+}
+
+#[test]
+fn test_repl_rag_full_session() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // RAG INGEST
+    let res = execute_repl_command(
+        &db,
+        &[
+            "RAG".into(),
+            "INGEST".into(),
+            "r_doc".into(),
+            "FlashStore embedded storage in Rust".into(),
+        ],
+    )?;
+    assert!(res.unwrap().contains("OK"));
+
+    // RAG GET
+    let res = execute_repl_command(&db, &["RAG".into(), "GET".into(), "r_doc".into()])?;
+    assert!(res.unwrap().contains("r_doc"));
+
+    // RAG QUERY
+    let res = execute_repl_command(
+        &db,
+        &["RAG".into(), "QUERY".into(), "embedded storage".into(), "1".into()],
+    )?;
+    assert!(res.unwrap().contains("r_doc"));
+
+    // RAG PROMPT
+    let res = execute_repl_command(
+        &db,
+        &["RAG".into(), "PROMPT".into(), "storage in Rust".into()],
+    )?;
+    assert!(res.unwrap().contains("=== Generated RAG Prompt"));
+
+    // RAG STATS
+    let res = execute_repl_command(&db, &["RAG".into(), "STATS".into()])?;
+    assert!(res.unwrap().contains("Documents:"));
+
+    // RAG LIST
+    let res = execute_repl_command(&db, &["RAG".into(), "LIST".into()])?;
+    assert!(res.unwrap().contains("r_doc"));
+
+    // RAG CACHE CLEAR
+    let res = execute_repl_command(&db, &["RAG".into(), "CACHE".into(), "CLEAR".into()])?;
+    assert!(res.unwrap().contains("cleared"));
+
+    // RAG EVAL
+    let res = execute_repl_command(&db, &["RAG".into(), "EVAL".into()])?;
+    assert!(res.unwrap().contains("RAG IR Evaluation"));
+
+    // RAG-DEL alias
+    let res = execute_repl_command(&db, &["RAG-DEL".into(), "r_doc".into()])?;
+    assert!(res.unwrap().contains("OK"));
+
+    // Missing key check
+    let res = execute_repl_command(&db, &["RAG".into(), "GET".into(), "r_doc".into()])?;
+    assert!(res.unwrap().contains("(nil)"));
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_rag_error_handling_and_validation() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Ingest without text, file, or batch_file -> InvalidArgument error
+    let res = run(
+        Cmd::Rag {
+            command: RagCmd::Ingest {
+                id: Some("doc_fail".into()),
+                text: None,
+                file: None,
+                batch_file: None,
+                title: None,
+                author: None,
+                tags: None,
+                metadata: Vec::new(),
+                chunk_size: None,
+                chunk_overlap: None,
+                chunk_strategy: "paragraphs".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 2. Query without query string or query_flag -> InvalidArgument error
+    let res = run(
+        Cmd::Rag {
+            command: RagCmd::Query {
+                query: None,
+                query_flag: None,
+                top_k: 5,
+                dense_weight: None,
+                sparse_weight: None,
+                fusion: "linear".into(),
+                no_rerank: false,
+                mmr: false,
+                mmr_lambda: 0.7,
+                min_score: None,
+                filters: Vec::new(),
+                format: "text".into(),
+                prompt: false,
+                explain: false,
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 3. Get without id or doc_id -> InvalidArgument error
+    let res = run(
+        Cmd::Rag {
+            command: RagCmd::Get {
+                id: None,
+                doc_id: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 4. Delete without id or doc_id -> InvalidArgument error
+    let res = run(
+        Cmd::Rag {
+            command: RagCmd::Delete {
+                id: None,
+                doc_id: None,
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 5. REPL invalid RAG command
+    let db = open_db(&opts)?;
+    let res = execute_repl_command(&db, &["RAG".into(), "INVALID_SUBCOMMAND".into()]);
+    assert!(res.is_err());
+
+    // 6. REPL missing arguments for RAG INGEST
+    let res = execute_repl_command(&db, &["RAG".into(), "INGEST".into()]);
+    assert!(res.is_err());
+
+    // 7. REPL missing arguments for RAG GET
+    let res = execute_repl_command(&db, &["RAG".into(), "GET".into()]);
+    assert!(res.is_err());
+
+    // 8. REPL missing arguments for RAG QUERY
+    let res = execute_repl_command(&db, &["RAG".into(), "QUERY".into()]);
+    assert!(res.is_err());
+
+    // 9. REPL invalid cache subcommand
+    let res = execute_repl_command(&db, &["RAG".into(), "CACHE".into(), "INVALID".into()]);
+    assert!(res.is_err());
+
+    Ok(())
+}
+

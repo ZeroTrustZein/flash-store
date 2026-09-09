@@ -512,9 +512,9 @@ mod tests {
         format_rag_doc(&doc, OutputFormat::Tsv);
         format_rag_doc(&doc, OutputFormat::Text);
 
-        format_rag_doc_list(&[doc.clone()], OutputFormat::Json);
-        format_rag_doc_list(&[doc.clone()], OutputFormat::Tsv);
-        format_rag_doc_list(&[doc.clone()], OutputFormat::Text);
+        format_rag_doc_list(std::slice::from_ref(&doc), OutputFormat::Json);
+        format_rag_doc_list(std::slice::from_ref(&doc), OutputFormat::Tsv);
+        format_rag_doc_list(std::slice::from_ref(&doc), OutputFormat::Text);
         format_rag_doc_list(&[], OutputFormat::Text);
 
         let hit = ScoredDocument {
@@ -527,9 +527,9 @@ mod tests {
             explanation: None,
         };
 
-        format_rag_results(&[hit.clone()], OutputFormat::Json, true);
-        format_rag_results(&[hit.clone()], OutputFormat::Tsv, true);
-        format_rag_results(&[hit.clone()], OutputFormat::Text, true);
+        format_rag_results(std::slice::from_ref(&hit), OutputFormat::Json, true);
+        format_rag_results(std::slice::from_ref(&hit), OutputFormat::Tsv, true);
+        format_rag_results(std::slice::from_ref(&hit), OutputFormat::Text, true);
         format_rag_results(&[], OutputFormat::Text, false);
 
         let engine = RagEngine::new(RagConfig::default());
