@@ -111,7 +111,7 @@ impl ContextConfig {
 /// Citation reference metadata associating a prompt index with source document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Citation {
-    /// 1-based index appearing in the assembled context prompt (e.g. [1]).
+    /// 1-based index appearing in the assembled context prompt (e.g. `[1]`).
     pub index: usize,
     /// Underlying document identifier.
     pub doc_id: String,
