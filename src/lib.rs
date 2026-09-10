@@ -11,6 +11,7 @@
 //! - **Block Cache**: Configurable LRU cache for uncompressed data blocks.
 //! - **Compaction Engine**: Multi-level tiered compaction that purges overwritten versions and tombstones.
 //! - **Manifest & Versioning**: ACID version edits tracking SSTable level assignments across crash recoveries.
+//! - **RAG & Reranker Subsystem**: Native hybrid BM25/vector retrieval, cross-encoder reranking, semantic caching, and LLM context assembly.
 //!
 //! ## Quick Start
 //!
@@ -32,6 +33,39 @@
 //!     println!("Found user: {}", String::from_utf8_lossy(&value));
 //! }
 //! db.delete("user_1001")?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## RAG & Vector Retrieval Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! # let dir = tempfile::tempdir().unwrap();
+//! let store_opts = OptionsBuilder::new().dir(dir.path()).build();
+//! let db = Arc::new(FlashStore::open(store_opts)?);
+//!
+//! let rag_config = RagConfigBuilder::new()
+//!     .embedding_dim(16)
+//!     .similarity_metric(SimilarityMetric::Cosine)
+//!     .build();
+//!
+//! let engine = RagEngine::with_store(rag_config, db);
+//! let embedder = Arc::new(MockEmbeddingProvider::new(16));
+//! let mut pipeline = RagPipeline::new(engine).with_embedder(embedder);
+//!
+//! pipeline.ingest_text(
+//!     "doc1",
+//!     "FlashStore is an embedded LSM-tree key-value storage engine in Rust.",
+//!     None,
+//! )?;
+//!
+//! let result = pipeline.query("FlashStore in Rust", 1)?;
+//! assert_eq!(result.documents.len(), 1);
+//! assert_eq!(result.documents[0].id.as_str(), "doc1");
 //! # Ok(())
 //! # }
 //! ```

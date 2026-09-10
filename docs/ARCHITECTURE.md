@@ -133,3 +133,66 @@ To avoid deadlocks and maximize throughput under heavy concurrent workloads, Fla
 
 - Readers acquire shared `RwLock` guards on memtables and run lock-free lookups on SSTables.
 - Writes append to WAL sequentially under `wal.lock()` and concurrently insert into memtable SkipLists.
+
+---
+
+## 6. Integrated RAG & Reranker Subsystem (Layer 2)
+
+FlashStore features a native **Retrieval-Augmented Generation (RAG) and Cross-Encoder Reranker** subsystem layered directly over the core LSM-Tree storage engine.
+
+```
++========================================================================+
+|                        RAG & RERANKER SUBSYSTEM                        |
+|                                                                        |
+|  +---------------------+  +--------------------+  +------------------+ |
+|  | Document Ingestion  |  |  BM25 Sparse Index |  | Dense Vector Idx | |
+|  | & Chunking Pipeline |  | (Inverted Index)   |  | (Cosine/Dot/L2)  | |
+|  +----------+----------+  +---------+----------+  +--------+---------+ |
+|             |                       |                      |           |
+|             |                       +----------+-----------+           |
+|             |                                  |                       |
+|             |                       +----------v-----------+           |
+|             |                       | Hybrid Fusion Engine |           |
+|             |                       | (RRF / Linear/Borda) |           |
+|             |                       +----------+-----------+           |
+|             |                                  |                       |
+|             |                       +----------v-----------+           |
+|             |                       | Cross-Encoder Rerank |           |
+|             |                       | (Lexical/Prox/MMR)   |           |
+|             |                       +----------+-----------+           |
+|             |                                  |                       |
+|             |                       +----------v-----------+           |
+|             |                       |  Context Assembler   |           |
+|             |                       |  (Citations/Prompt)  |           |
+|             |                       +----------+-----------+           |
+|             |                                  |                       |
++=============|==================================|=======================+
+              |                                  |
+              | Atomically Persisted             | Key-Space Lookups
+              v                                  v
++========================================================================+
+|                    CORE FLASHSTORE LSM-TREE (LAYER 1)                  |
+|                                                                        |
+|    WAL (CRC32)  ──>  Concurrent MemTables  ──>  SSTables (L0..LN)      |
+|    Block Cache  ──>  Leveled Compaction    ──>  VersionSet / Manifest  |
++========================================================================+
+```
+
+### 6.1 Storage Adapter & Atomic WriteBatch
+
+The `RagStoreAdapter` maps high-level document domain models to FlashStore's key-value space using binary prefixes:
+- `rag:doc:<doc_id>`: UTF-8 raw text payload.
+- `rag:vec:<doc_id>`: Little-endian IEEE-754 vector embedding byte slice.
+- `rag:meta:<doc_id>`: Serialized metadata key-value pairs.
+- `rag:chunk:<doc_id>:<chunk_idx>`: Chunk boundaries, text, and offset indices.
+- `rag:sys:<key>`: Schema version and subsystem statistics.
+
+Every document ingestion is batched into a single atomic `WriteBatch`, ensuring that text, chunks, embeddings, and metadata are written together to the WAL with strict crash consistency.
+
+### 6.2 Dual-Mode Engine Design
+
+1. **In-Memory Mode (`RagEngine::new(config)`)**: Ultra-fast ephemeral indexing suitable for stateless workers, unit testing, and microbenchmarks.
+2. **Persistent Mode (`RagEngine::with_store(config, store)` / `recover(...)`)**: Backed by a FlashStore instance, providing instant startup hydration by replaying persisted document keys and vectors from SSTables.
+
+For detailed algorithms, vector similarity metrics, BM25 formulas, and reranking heuristics, see the comprehensive [RAG & Reranker Architecture Guide](RAG_RERANKER.md).
+

@@ -4,7 +4,7 @@
 [![CI Status](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rustc-1.75%2B-brightgreen.svg)](https://blog.rust-lang.org/)
 
-**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, and fast range scans, FlashStore provides a modular architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, and atomic VersionSet metadata management.
+**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust, featuring a native **RAG (Retrieval-Augmented Generation), Cross-Encoder Reranking, and Semantic Caching Subsystem**. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, fast range scans, and intelligent vector-lexical retrieval, FlashStore provides a modular architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, atomic `WriteBatch` persistence, hybrid BM25/vector search, and cross-encoder reranking.
 
 ---
 
@@ -12,10 +12,11 @@
 
 - [Key Highlights](#-key-highlights)
 - [Architecture & Design](#-architecture--design)
-  - [High-Level Swarm Architecture](#high-level-swarm-architecture)
+  - [High-Level Layered Architecture](#high-level-layered-architecture)
   - [Write Path (Insert / Update / Delete / Batch)](#write-path-insert--update--delete--batch)
   - [Read Path (Point Lookup)](#read-path-point-lookup)
   - [SSTable File Layout](#sstable-file-layout)
+  - [RAG & Reranker Subsystem Architecture](#rag--reranker-subsystem-architecture)
 - [Feature Matrix](#-feature-matrix)
 - [Installation & Setup](#-installation--setup)
 - [Rust API Reference](#-rust-api-reference)
@@ -27,12 +28,14 @@
   - [Engine Statistics & Monitoring](#engine-statistics--monitoring)
   - [Manual & Automated Flush / Compaction](#manual--automated-flush--compaction)
   - [Clean Shutdown & Crash Recovery](#clean-shutdown--crash-recovery)
+  - [RAG Retrieval & Reranker Pipeline API](#rag-retrieval--reranker-pipeline-api)
 - [Command Line Interface (`flash-cli`)](#-command-line-interface-flash-cli)
   - [CLI Overview & Global Flags](#cli-overview--global-flags)
   - [One-Shot Subcommands](#one-shot-subcommands)
   - [Interactive REPL Shell](#interactive-repl-shell)
   - [Batch Script File Formats](#batch-script-file-formats)
   - [SSTable Deep Inspection](#sstable-deep-inspection)
+  - [RAG & Vector Search Subcommands (`flash-cli rag`)](#rag--vector-search-subcommands-flash-cli-rag)
 - [Engine Internals Deep Dive](#-engine-internals-deep-dive)
   - [1. Write-Ahead Log (WAL)](#1-write-ahead-log-wal)
   - [2. MemTable & SkipList](#2-memtable--skiplist)
@@ -41,6 +44,7 @@
   - [5. Leveled Compaction Engine](#5-leveled-compaction-engine)
   - [6. Manifest & VersionSet Architecture](#6-manifest--versionset-architecture)
   - [7. Concurrency & Multi-Version Ordering](#7-concurrency--multi-version-ordering)
+  - [8. Hybrid RAG Retrieval, Reranking & Caching](#8-hybrid-rag-retrieval-reranking--caching)
 - [Configuration Reference](#-configuration-reference)
 - [Code Examples](#-code-examples)
   - [Basic CRUD Lifecycle](#basic-crud-lifecycle)
@@ -48,6 +52,7 @@
   - [Range Queries & Prefix Scans](#range-queries--prefix-scans)
   - [Crash Recovery & Durability](#crash-recovery--durability)
   - [Multi-Threaded Worker Pool](#multi-threaded-worker-pool)
+  - [End-to-End RAG Pipeline & Semantic Caching](#end-to-end-rag-pipeline--semantic-caching)
 - [Deep Technical Documentation](#-deep-technical-documentation)
 - [Benchmarks & Performance](#-benchmarks--performance)
 - [Testing & Quality Assurance](#-testing--quality-assurance)
@@ -64,7 +69,10 @@
 - **LRU Block Cache**: In-memory LRU caching of decoded SSTable data blocks prevents redundant disk access on repeated or sequential reads.
 - **Deterministic Multi-Level Compaction**: Background compactor merges overlapping SSTable key ranges across levels, reclaims disk space, and purges obsolete versions and tombstones.
 - **ACID Manifest & Crash Resilience**: Atomic `VersionEdit` delta logging guarantees zero data loss on unexpected power cuts or OS crashes.
-- **Rich CLI & Interactive REPL**: Built-in CLI tool (`flash-cli`) supporting text, JSON, and TSV formats, file-based batch execution, and full SSTable binary dissection.
+- **Native RAG & Cross-Encoder Reranking**: Built-in hybrid retrieval combining dense vector similarity with BM25 sparse search, fused via Reciprocal Rank Fusion (RRF), and scored with cross-encoder lexical-semantic alignment.
+- **Semantic Vector Query Cache**: Instant sub-millisecond query responses for semantically equivalent queries using cosine similarity thresholds, TTL expiration, and LRU eviction.
+- **Context Assembly & LLM Citations**: Token-budget-aware context packing with configurable truncation (`TruncateLast`, `DropOversized`), structured layouts (Markdown, XML, Numbered, Compact), and 1-based citation references (`[1]`, `[2]`).
+- **Rich CLI & Interactive REPL**: Built-in CLI tool (`flash-cli`) supporting KV operations, RAG pipelines, text/JSON/TSV formats, batch files, and SSTable binary dissection.
 
 ---
 
@@ -158,6 +166,55 @@ Read Key ──> Active MemTable ──> Imm MemTables ──> L0 SSTables (Rev)
 +-----------------------------------------------------------------------+
 ```
 
+### RAG & Reranker Subsystem Architecture
+
+FlashStore includes a native high-performance RAG and reranker layer on top of the LSM-Tree engine:
+
+```
+                                 [ User Query ]
+                                       │
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │     Semantic Vector Cache         │
+                     │  (Exact Match / Cosine Threshold) ├───────────┐
+                     └─────────────────┬─────────────────┘           │
+                                       │ Cache Miss                  │ Cache Hit
+                                       ▼                             │ (Fast Return)
+                     ┌───────────────────────────────────┐           │
+                     │    Query Vector Embedding         │           │
+                     │  (EmbeddingProvider Interface)    │           │
+                     └─────────────────┬─────────────────┘           │
+                                       │                             │
+                     ┌─────────────────┴─────────────────┐           │
+                     ▼                                   ▼           │
+       ┌───────────────────────────┐       ┌─────────────────────────┴─┐
+       │    Sparse Lexical Search  │       │    Dense Vector Search    │
+       │  (BM25 Inverted Index)    │       │  (Cosine / Dot / L2)      │
+       └─────────────┬─────────────┘       └─────────────┬─────────────┘
+                     │ Top-K Sparse                      │ Top-K Dense
+                     └─────────────────┬─────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │      Hybrid Score Fusion          │
+                     │   (RRF / Weighted Linear / Borda) │
+                     └─────────────────┬─────────────────┘
+                                       │ Fused Candidates
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │    Cross-Encoder Reranker         │
+                     │ (Lexical-Semantic / MMR Diversity)│
+                     └─────────────────┬─────────────────┘
+                                       │ Reranked Candidates
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │     Context Assembler & Prompter  │
+                     │ (Token Budget / Citations / XML)  │
+                     └─────────────────┬─────────────────┘
+                                       │
+                                       ▼
+                     [ LLM Prompt / Pipeline Result ] ◄──────────────┘
+```
+
 ---
 
 ## 📊 Feature Matrix
@@ -176,6 +233,13 @@ Read Key ──> Active MemTable ──> Imm MemTables ──> L0 SSTables (Rev)
 | **Crash Recovery** | ✅ | Auto-recovery on start from WAL replay + MANIFEST edits |
 | **Zero External C Libraries** | ✅ | 100% pure Rust code base with standard cargo toolchain |
 | **CLI & REPL** | ✅ | Full-featured command-line interface with interactive mode |
+| **Hybrid RAG Retrieval** | ✅ | Parallel dense vector and BM25 sparse inverted index search |
+| **Score Fusion Strategies** | ✅ | Reciprocal Rank Fusion (RRF), Weighted Linear, and Borda Count |
+| **Cross-Encoder Reranker** | ✅ | Deep lexical-semantic pair evaluation with score explanations |
+| **MMR Diversity Reranking**| ✅ | Maximal Marginal Relevance balancing relevance vs redundancy |
+| **Semantic Query Cache** | ✅ | Multi-tier LRU cache with cosine similarity threshold and TTL |
+| **Context Assembly** | ✅ | Token budgeting, truncation (`TruncateLast`), and citations (`[1]`) |
+| **IR Telemetry & Eval** | ✅ | Built-in MRR, Recall@K, Precision@K, NDCG@K, and stage latency |
 
 ---
 
@@ -391,6 +455,66 @@ fn lifecycle() -> Result<()> {
 }
 ```
 
+### RAG Retrieval & Reranker Pipeline API
+
+FlashStore provides `RagPipeline` and `RagEngine` for building retrieval-augmented generation applications directly on top of the LSM-tree storage engine:
+
+```rust
+use flash_store::prelude::*;
+use std::sync::Arc;
+
+fn rag_example(db: Arc<FlashStore>) -> Result<()> {
+    // 1. Configure RAG Engine with hybrid weights and semantic caching
+    let config = RagConfigBuilder::new()
+        .embedding_dim(384)
+        .similarity_metric(SimilarityMetric::Cosine)
+        .hybrid_dense_weight(0.5)
+        .rrf_k(60)
+        .semantic_cache(5000, 0.92, 3600)
+        .build();
+
+    let engine = RagEngine::with_store(config, db);
+
+    // 2. Wrap in RagPipeline with an embedding provider and chunking
+    let embedder = Arc::new(MockEmbeddingProvider::new(384));
+    let mut pipeline = RagPipeline::new(engine)
+        .with_embedder(embedder)
+        .with_chunking(ChunkingConfig {
+            strategy: ChunkingStrategy::Paragraph,
+            min_chunk_size: 20,
+        })
+        .with_context_config(ContextConfig {
+            format: ContextFormat::Markdown,
+            max_chars: 4096,
+            include_scores: true,
+            include_metadata: true,
+            ..Default::default()
+        });
+
+    // 3. Ingest documents
+    let mut meta = DocumentMetadata::new();
+    meta.insert("author", "Zein");
+    meta.insert("category", "database");
+
+    pipeline.ingest_text(
+        "doc_wal",
+        "The Write-Ahead Log guarantees durability by appending records before applying to MemTable.",
+        Some(meta),
+    )?;
+
+    // 4. Query with hybrid retrieval, cross-encoder reranking, and prompt generation
+    let result = pipeline.query("How does the WAL guarantee durability?", 3)?;
+
+    for doc in &result.documents {
+        println!("Hit: {} (Score: {:.4})", doc.id, doc.score);
+    }
+
+    // Ready-to-use LLM prompt with structured citations
+    println!("LLM Prompt:\n{}", result.prompt);
+    Ok(())
+}
+```
+
 ---
 
 ## 💻 Command Line Interface (`flash-cli`)
@@ -582,6 +706,74 @@ Largest Key:      account:050
 
 ---
 
+### RAG & Vector Search Subcommands (`flash-cli rag`)
+
+`flash-cli rag` exposes the complete RAG, vector search, reranking, and semantic caching engine via the command line and interactive REPL.
+
+#### 1. Ingest Documents (`ingest`)
+```bash
+# Ingest raw text with metadata
+flash-cli --path ./my_db rag ingest \
+  --id doc1 \
+  --text "LSM-trees organize writes sequentially into WAL and MemTables before flushing to SSTables." \
+  --title "LSM Architecture" \
+  --tags storage,lsm \
+  --meta category=database_internals
+
+# Ingest markdown file with automatic paragraph chunking
+flash-cli --path ./my_db rag ingest \
+  --file docs/ARCHITECTURE.md \
+  --chunk-strategy paragraphs \
+  --chunk-size 512
+
+# Ingest batch JSON file
+flash-cli --path ./my_db rag ingest --batch-file data/knowledge_base.json
+```
+
+#### 2. Hybrid Retrieval & Cross-Encoder Query (`query`)
+```bash
+# Basic query with top-5 results
+flash-cli --path ./my_db rag query "How are writes handled?" --top-k 5
+
+# Hybrid query with Reciprocal Rank Fusion (RRF) and MMR diversity reranking
+flash-cli --path ./my_db rag query "SSTable compression" \
+  --fusion rrf \
+  --mmr \
+  --mmr-lambda 0.7
+
+# JSON output with detailed cross-encoder score explanations
+flash-cli --path ./my_db rag query "WAL durability" --explain --format json
+
+# Format as an LLM prompt ready for generation with citations
+flash-cli --path ./my_db rag query "Explain the block cache" --prompt --format prompt
+```
+
+#### 3. Inspect, List, and Delete Documents
+```bash
+# Retrieve document by ID
+flash-cli --path ./my_db rag get doc1
+
+# List indexed documents
+flash-cli --path ./my_db rag list --limit 10
+
+# Delete document and associated chunks/embeddings
+flash-cli --path ./my_db rag delete doc1
+```
+
+#### 4. Telemetry, Cache Management, and IR Evaluation
+```bash
+# View RAG query stats, cache hit rates, and latency breakdown
+flash-cli --path ./my_db rag stats
+
+# Clear the semantic vector cache
+flash-cli --path ./my_db rag clearcache
+
+# Run IR benchmark evaluation (Recall@K, MRR, NDCG@K)
+flash-cli --path ./my_db rag eval --samples-file benchmarks/eval_queries.json --k 5
+```
+
+---
+
 ## 🔬 Engine Internals Deep Dive
 
 ### 1. Write-Ahead Log (WAL)
@@ -640,9 +832,20 @@ FlashStore implements a multi-tier compaction scheduler:
 - **Writer Synchronization**: MemTable flushes and compaction runs acquire non-blocking individual mutexes (`flush_lock`, `compact_lock`), allowing client point writes and batch inserts to progress uninterrupted.
 - **Reader Isolation**: Readers acquire short read locks on `memtable` and `imm_memtables`, avoiding global lock contention.
 
+### 8. Hybrid RAG Retrieval, Reranking & Caching
+
+- **Unified Key-Space**: Documents, chunks, embeddings, and metadata are persisted with binary prefixes (`rag:doc:`, `rag:vec:`, `rag:meta:`, `rag:chunk:`) using atomic `WriteBatch` operations.
+- **BM25 Sparse Search**: Tokenizes queries and passages into inverted index postings with configurable saturation $k_1$ and document length normalization $b$.
+- **Dense Vector Search**: Computes Cosine Similarity, Dot Product, or Euclidean distance over normalized continuous vector representations.
+- **Reciprocal Rank Fusion (RRF)**: Combines dense and sparse rank candidate lists without requiring score scale calibration.
+- **Lexical-Semantic Cross-Encoder**: Scores candidate passages against queries using token coverage, phrase/bigram alignment, and term proximity.
+- **Semantic Vector Query Cache**: Intercepts queries using exact text matching and cosine similarity thresholding to return cached hits in sub-millisecond time.
+
 ---
 
 ## ⚙️ Configuration Reference
+
+### Storage Engine Options (`Options`)
 
 | Option Field | Default Value | Description & Tuning Advice |
 | :--- | :---: | :--- |
@@ -655,6 +858,20 @@ FlashStore implements a multi-tier compaction scheduler:
 | `sync_wal` | `false` | When `true`, calls `fsync` after every WAL append. Ensures maximum durability at the cost of write IOPS. |
 | `block_cache_size` | `64 * 1024 * 1024` (64 MB) | In-memory capacity allocated for the LRU Block Cache. |
 | `create_if_missing` | `true` | When `true`, automatically creates parent directories if they do not exist. |
+
+### RAG Subsystem Options (`RagConfig`)
+
+| Option Field | Default Value | Description & Tuning Advice |
+| :--- | :---: | :--- |
+| `embedding_dim` | `384` | Dimension of dense vector embeddings (e.g. 384, 768, 1536). |
+| `similarity_metric` | `Cosine` | Vector distance metric: `Cosine`, `DotProduct`, or `Euclidean`. |
+| `bm25_k1` | `1.2` | BM25 term frequency saturation parameter. |
+| `bm25_b` | `0.75` | BM25 document length normalization parameter. |
+| `hybrid_dense_weight` | `0.5` | Weight for dense vector scores in linear fusion ($0.0 \to 1.0$). |
+| `rrf_k` | `60` | Reciprocal Rank Fusion smoothing parameter. |
+| `semantic_cache_capacity` | `10,000` | Maximum number of cached query embeddings in LRU cache. |
+| `semantic_cache_threshold` | `0.92` | Minimum cosine similarity to trigger a semantic cache hit. |
+| `semantic_cache_ttl_secs` | `3600` | TTL in seconds for cached query results ($0 = \text{infinite}$). |
 
 ---
 
@@ -781,6 +998,16 @@ Demonstrates persistent WAL replay, crash simulation, and SSTable recovery:
 cargo run --example recovery_demo
 ```
 
+### End-to-End RAG Pipeline & Semantic Caching
+
+Full source in [`examples/rag_pipeline.rs`](examples/rag_pipeline.rs):
+
+Demonstrates document ingestion with metadata, text chunking, dense vector embeddings, hybrid retrieval (BM25 + vector), Reciprocal Rank Fusion, cross-encoder reranking with score explanations, LLM context assembly with citations, and semantic vector cache hits:
+
+```bash
+cargo run --example rag_pipeline
+```
+
 ---
 
 ## 📚 Deep Technical Documentation
@@ -788,6 +1015,7 @@ cargo run --example recovery_demo
 Detailed architecture specifications, binary formats, and algorithms are available in the [`docs/`](docs/) directory:
 
 - 🏛 **[Architecture Guide](docs/ARCHITECTURE.md)**: High-level overview, subsystem components, read/write lifecycles, and concurrency lock hierarchy.
+- 🧠 **[RAG Retrieval, Reranking & Caching Guide](docs/RAG_RERANKER.md)**: Hybrid BM25/vector search, Reciprocal Rank Fusion, cross-encoder scoring, MMR diversity, semantic cache, and prompt assembly.
 - 💾 **[SSTable Binary Format Specification](docs/SSTABLE_FORMAT.md)**: Byte-level layout of Data Blocks, Bloom Filters, Meta Index, Index Blocks, and 48-byte Footers.
 - 📜 **[Write-Ahead Log (WAL) & Recovery Protocol](docs/WAL_RECOVERY.md)**: CRC32-IEEE framing, synchronous vs asynchronous durability, and crash recovery algorithm.
 - 🔄 **[Leveled Compaction Architecture](docs/COMPACTION.md)**: Dynamic level scoring, multi-way merge iterators, tombstone purging, and manifest updates.

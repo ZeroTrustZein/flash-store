@@ -3,6 +3,42 @@
 //! Extends FlashStore with hybrid dense-sparse retrieval, cross-encoder
 //! reranking, semantic vector query caching, prompt context assembly,
 //! offline embedding providers, and IR telemetry evaluation.
+//!
+//! ## Subsystem Architecture
+//!
+//! 1. **Document Ingestion & Chunking** ([`chunker`]): Flexible text splitting using paragraph, sentence, fixed-token, or fixed-character boundaries.
+//! 2. **Sparse Lexical Search** ([`sparse`]): Okapi BM25 inverted index with tokenization, term frequency saturation, and IDF scoring.
+//! 3. **Dense Vector Search** ([`dense`]): High-performance vector index supporting Cosine similarity, Dot Product, and Euclidean distance.
+//! 4. **Hybrid Search Fusion** ([`hybrid`]): Combines candidate lists using Reciprocal Rank Fusion (RRF), Weighted Linear Combination, or Borda Count.
+//! 5. **Cross-Encoder Reranking** ([`reranker`]): Evaluates query-document pairs using token overlap, contiguous phrase matching, and term proximity, with optional Maximal Marginal Relevance (MMR) diversity reranking.
+//! 6. **Semantic Vector Cache** ([`cache`]): In-memory query cache with cosine similarity thresholding, TTL expiration, and LRU eviction.
+//! 7. **Context Assembly & Prompting** ([`context`]): Assembles retrieved passages into LLM prompts respecting token budgets and formatting structured citations (`[1]`, `[2]`).
+//! 8. **Storage Persistence** ([`store`]): Maps documents, vectors, metadata, and chunks into FlashStore's LSM key-space via atomic [`crate::batch::WriteBatch`] transactions.
+//! 9. **End-to-End Pipeline** ([`pipeline`]): Coordinates ingestion, embedding generation, query execution, and prompt synthesis.
+//!
+//! ## Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! let config = RagConfigBuilder::new()
+//!     .embedding_dim(16)
+//!     .similarity_metric(SimilarityMetric::Cosine)
+//!     .build();
+//!
+//! let engine = RagEngine::new(config);
+//! let embedder = Arc::new(MockEmbeddingProvider::new(16));
+//! let mut pipeline = RagPipeline::new(engine).with_embedder(embedder);
+//!
+//! pipeline.ingest_text("doc1", "FlashStore provides fast writes and reads.", None)?;
+//! let result = pipeline.query("FlashStore reads", 1)?;
+//! assert_eq!(result.documents.len(), 1);
+//! assert_eq!(result.documents[0].id.as_str(), "doc1");
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod cache;
 pub mod chunker;
