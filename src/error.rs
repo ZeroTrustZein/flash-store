@@ -26,6 +26,15 @@ pub enum FlashStoreError {
     #[error("Bincode serialization/deserialization error: {0}")]
     BincodeError(#[from] bincode::Error),
 
+    #[error("JSON serialization error: {0}")]
+    JsonError(#[from] serde_json::Error),
+
+    #[error("Vector dimension mismatch: expected {expected}, got {actual}")]
+    VectorDimensionMismatch { expected: usize, actual: usize },
+
+    #[error("RAG error: {0}")]
+    Rag(String),
+
     #[error("Other error: {0}")]
     Other(String),
 }

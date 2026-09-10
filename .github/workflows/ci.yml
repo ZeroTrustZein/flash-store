@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "feature/**"]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -104,3 +104,6 @@ jobs:
 
       - name: Check benchmarks and examples
         run: cargo check --benches --examples --all-features
+
+      - name: Check release build
+        run: cargo check --release --all-targets --all-features

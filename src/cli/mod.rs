@@ -1,7 +1,10 @@
 pub mod batch_parser;
 pub mod formatter;
 pub mod inspect;
+pub mod rag;
 pub mod repl;
+
+pub use rag::{open_rag_pipeline, RagCmd};
 
 use crate::config::OptionsBuilder;
 use crate::engine::FlashStore;
@@ -124,6 +127,11 @@ pub enum Cmd {
     },
     /// Start interactive REPL.
     Repl,
+    /// RAG hybrid retrieval, cross-encoder reranking, and document ingestion.
+    Rag {
+        #[command(subcommand)]
+        command: rag::RagCmd,
+    },
 }
 
 /// Open FlashStore from global opts.
@@ -295,6 +303,9 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         Cmd::Repl => {
             let db = open_db(opts)?;
             repl::run_repl(db, opts)?;
+        }
+        Cmd::Rag { command } => {
+            rag::run_rag_command(command, opts)?;
         }
     }
     Ok(())
