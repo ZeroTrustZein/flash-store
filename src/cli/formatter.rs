@@ -1,3 +1,7 @@
+use crate::agent::{
+    AgentDefinition, AgentMetricsSnapshot, AgentTask, ScoredMemory, TaskExecutionReport,
+    ToolDefinition, ToolOutput, WorkflowSummary,
+};
 use crate::cli::OutputFormat;
 use crate::engine::Stats;
 use crate::rag::{Document, EvaluationSummary, PipelineQueryResult, RagEngine, ScoredDocument};
@@ -482,6 +486,432 @@ pub fn format_rag_doc_list(docs: &[Document], format: OutputFormat) {
     }
 }
 
+/// Format and print a list of registered agents.
+pub fn format_agent_list(agents: &[AgentDefinition], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(agents).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("id\tname\trole\tcapabilities\titerations");
+            for a in agents {
+                let caps: Vec<String> = a.capabilities.iter().map(|c| c.to_string()).collect();
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    a.id.as_str(),
+                    a.name,
+                    a.role,
+                    caps.join(","),
+                    a.max_iterations
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if agents.is_empty() {
+                println!("(no active agents registered)");
+                return;
+            }
+            println!("=== Active Swarm Agents ({}) ===", agents.len());
+            for (i, a) in agents.iter().enumerate() {
+                let caps: Vec<String> = a.capabilities.iter().map(|c| c.to_string()).collect();
+                println!(
+                    "{}) [{}] {} (Role: {})",
+                    i + 1,
+                    a.id.as_str(),
+                    a.name,
+                    a.role
+                );
+                println!(
+                    "   Capabilities:   {}",
+                    if caps.is_empty() {
+                        "none".into()
+                    } else {
+                        caps.join(", ")
+                    }
+                );
+                println!("   Max Iterations: {}", a.max_iterations);
+                if !a.system_prompt.is_empty() {
+                    let prompt_snippet = if a.system_prompt.len() > 80 {
+                        format!("{}...", &a.system_prompt[..80])
+                    } else {
+                        a.system_prompt.clone()
+                    };
+                    println!("   Prompt:         {}", prompt_snippet);
+                }
+            }
+        }
+    }
+}
+
+/// Format and print a list of workflow tasks.
+pub fn format_task_list(tasks: &[AgentTask], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(tasks).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("id\ttitle\tpriority\tstatus\tassigned");
+            for t in tasks {
+                let assigned = t.assigned_agent.as_ref().map(|a| a.as_str()).unwrap_or("-");
+                println!(
+                    "{}\t{}\t{}\t{:?}\t{}",
+                    t.id.as_str(),
+                    t.title,
+                    t.priority.as_str(),
+                    t.status,
+                    assigned
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if tasks.is_empty() {
+                println!("(no tasks found)");
+                return;
+            }
+            println!("=== Swarm Workflow Tasks ({}) ===", tasks.len());
+            for (i, t) in tasks.iter().enumerate() {
+                let assigned = t
+                    .assigned_agent
+                    .as_ref()
+                    .map(|a| a.as_str())
+                    .unwrap_or("unassigned");
+                println!(
+                    "{}) [{}] \"{}\" | status: {:?} | priority: {} | agent: {}",
+                    i + 1,
+                    t.id.as_str(),
+                    t.title,
+                    t.status,
+                    t.priority.as_str(),
+                    assigned
+                );
+                let desc = if t.description.len() > 100 {
+                    format!("{}...", &t.description[..100])
+                } else {
+                    t.description.clone()
+                };
+                println!("   Desc: {}", desc);
+                if let Some(ref out) = t.output_artifacts {
+                    let out_str = out.to_string();
+                    let out_snippet = if out_str.len() > 80 {
+                        format!("{}...", &out_str[..80])
+                    } else {
+                        out_str
+                    };
+                    println!("   Out:  {}", out_snippet);
+                }
+            }
+        }
+    }
+}
+
+/// Format and print detailed task metadata and execution history.
+pub fn format_task_detail(task: &AgentTask, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(task).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            let assigned = task.assigned_agent.as_ref().map(|a| a.as_str()).unwrap_or("-");
+            println!(
+                "{}\t{}\t{}\t{:?}\t{}",
+                task.id.as_str(),
+                task.title,
+                task.priority.as_str(),
+                task.status,
+                assigned
+            );
+        }
+        OutputFormat::Text => {
+            println!("=== Task Detail: [{}] ===", task.id.as_str());
+            println!("Title:       {}", task.title);
+            println!("Status:      {:?}", task.status);
+            println!("Priority:    {}", task.priority.as_str());
+            println!(
+                "Assigned:    {}",
+                task.assigned_agent
+                    .as_ref()
+                    .map(|a| a.as_str())
+                    .unwrap_or("(none)")
+            );
+            println!("Description: {}", task.description);
+            if !task.input_context.is_null() {
+                println!("Input:       {}", task.input_context);
+            }
+            if let Some(ref output) = task.output_artifacts {
+                println!("Output:      {}", output);
+            }
+            if let Some(ref err) = task.error_message {
+                println!("Error:       {}", err);
+            }
+            println!("Created At:  {}", task.created_at);
+            println!("Updated At:  {}", task.updated_at);
+        }
+    }
+}
+
+/// Format and print execution report of a single task.
+pub fn format_task_report(report: &TaskExecutionReport, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(report).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!(
+                "{}\t{}\t{:?}\t{}\t{}",
+                report.task_id.as_str(),
+                report.assigned_agent.as_str(),
+                report.status,
+                report.execution_time_ms,
+                report.tool_calls_executed
+            );
+        }
+        OutputFormat::Text => {
+            println!("=== Task Execution Report ===");
+            println!("Task ID:             {}", report.task_id.as_str());
+            println!("Assigned Agent:      {}", report.assigned_agent.as_str());
+            println!("Status:              {:?}", report.status);
+            println!("Execution Time:      {} ms", report.execution_time_ms);
+            println!("Routing:             {}", report.routing_decision.rationale);
+            println!("Tool Calls:          {}", report.tool_calls_executed);
+            println!("Reflection Passes:   {}", report.reflection_iterations);
+            if let Some(ref verdict) = report.reflection_verdict {
+                println!("Reflection Verdict:  {:?}", verdict);
+            }
+            if let Some(ref out) = report.output {
+                println!(
+                    "Output:\n{}",
+                    serde_json::to_string_pretty(out).unwrap_or_default()
+                );
+            }
+            if let Some(ref err) = report.error {
+                println!("Error:               {}", err);
+            }
+        }
+    }
+}
+
+/// Format and print summary of full workflow execution.
+pub fn format_workflow_summary(summary: &WorkflowSummary, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(summary).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!(
+                "{}\t{:?}\t{}\t{}\t{}\t{}",
+                summary.workflow_id,
+                summary.status,
+                summary.total_tasks,
+                summary.completed_tasks,
+                summary.failed_tasks,
+                summary.total_duration_ms
+            );
+        }
+        OutputFormat::Text => {
+            println!("=== Workflow Execution Summary ===");
+            println!("Workflow ID:     {}", summary.workflow_id);
+            println!("Status:          {:?}", summary.status);
+            println!("Total Tasks:     {}", summary.total_tasks);
+            println!("Completed Tasks: {}", summary.completed_tasks);
+            println!("Failed Tasks:    {}", summary.failed_tasks);
+            println!("Tool Calls:      {}", summary.total_tool_calls);
+            println!("Messages:        {}", summary.total_messages);
+            println!("Duration:        {} ms", summary.total_duration_ms);
+            println!("\nTask Breakdown:");
+            for r in &summary.reports {
+                println!(
+                    "  - [{}] agent: {}, status: {:?}, time: {}ms",
+                    r.task_id.as_str(),
+                    r.assigned_agent.as_str(),
+                    r.status,
+                    r.execution_time_ms
+                );
+            }
+        }
+    }
+}
+
+/// Format and print list of registered tools.
+pub fn format_tools_list(tools: &[ToolDefinition], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(tools).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("name\tdescription\tparameters_count\tdeterministic\ttimeout_ms");
+            for t in tools {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    t.name,
+                    t.description,
+                    t.parameters.len(),
+                    t.is_deterministic,
+                    t.timeout_ms
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if tools.is_empty() {
+                println!("(no registered tools)");
+                return;
+            }
+            println!("=== Registered Swarm Tools ({}) ===", tools.len());
+            for (i, t) in tools.iter().enumerate() {
+                println!("{}) Tool: '{}'", i + 1, t.name);
+                println!("   Description: {}", t.description);
+                if !t.parameters.is_empty() {
+                    let param_strs: Vec<String> = t
+                        .parameters
+                        .iter()
+                        .map(|p| {
+                            let req = if p.required { "*" } else { "" };
+                            format!("{}{}: {:?}", p.name, req, p.param_type)
+                        })
+                        .collect();
+                    println!("   Parameters:  {}", param_strs.join(", "));
+                }
+            }
+        }
+    }
+}
+
+/// Format and print output of a tool execution.
+pub fn format_tool_output(output: &ToolOutput, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(output).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                output.call_id, output.tool_name, output.success, output.execution_time_ms, output.result
+            );
+        }
+        OutputFormat::Text => {
+            println!("=== Tool Output: '{}' ===", output.tool_name);
+            println!("Call ID:        {}", output.call_id);
+            println!("Success:        {}", output.success);
+            println!("Execution Time: {} ms", output.execution_time_ms);
+            if let Some(ref err) = output.error {
+                println!("Error:          {}", err);
+            }
+            println!(
+                "Result:\n{}",
+                serde_json::to_string_pretty(&output.result).unwrap_or_default()
+            );
+        }
+    }
+}
+
+/// Format and print episodic memory entries.
+pub fn format_agent_memories(memories: &[ScoredMemory], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(memories).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("id\tagent\tscore\timportance\tcontent");
+            for m in memories {
+                println!(
+                    "{}\t{}\t{:.4}\t{:.2}\t{}",
+                    m.memory.id,
+                    m.memory.agent_id.as_str(),
+                    m.score,
+                    m.memory.importance,
+                    m.memory.content
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if memories.is_empty() {
+                println!("(no memories found)");
+                return;
+            }
+            println!("=== Recalled Swarm Memories ({}) ===", memories.len());
+            for (i, m) in memories.iter().enumerate() {
+                println!(
+                    "{}) [{}] Agent: '{}' (Score: {:.4}, Imp: {:.2})",
+                    i + 1,
+                    m.memory.id,
+                    m.memory.agent_id.as_str(),
+                    m.score,
+                    m.memory.importance
+                );
+                if !m.memory.tags.is_empty() {
+                    println!("   Tags:    {}", m.memory.tags.join(", "));
+                }
+                println!("   Content: {}", m.memory.content);
+            }
+        }
+    }
+}
+
+/// Format and print agent telemetry metrics snapshot.
+pub fn format_agent_metrics(metrics: &AgentMetricsSnapshot, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(metrics).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!(
+                "{}\t{}\t{}\t{:.2}\t{}\t{}\t{}",
+                metrics.tasks_submitted,
+                metrics.tasks_completed,
+                metrics.tasks_failed,
+                metrics.task_success_rate * 100.0,
+                metrics.total_tool_calls,
+                metrics.successful_tool_calls,
+                metrics.total_reflection_passes
+            );
+        }
+        OutputFormat::Text => {
+            println!("=== Swarm Telemetry & Metrics ===");
+            println!("Tasks Submitted:     {}", metrics.tasks_submitted);
+            println!("Tasks Completed:     {}", metrics.tasks_completed);
+            println!("Tasks Failed:        {}", metrics.tasks_failed);
+            println!("Tasks Preempted:     {}", metrics.tasks_preempted);
+            println!("Success Rate:        {:.2}%", metrics.task_success_rate * 100.0);
+            println!("Task Latency (avg):  {:.2} ms", metrics.task_execution_latency.avg_ms);
+            println!("Task Latency (max):  {:.2} ms", metrics.task_execution_latency.max_ms);
+            println!("Total Tool Calls:    {}", metrics.total_tool_calls);
+            println!("Tool Success Rate:   {:.2}%", metrics.tool_success_rate * 100.0);
+            println!("Tool Latency (avg):  {:.2} ms", metrics.tool_execution_latency.avg_ms);
+            println!("Total Reflections:   {}", metrics.total_reflection_passes);
+            println!("Reflection Approval: {:.2}%", metrics.reflection_approval_rate * 100.0);
+            println!("Episodic Records:    {}", metrics.episodic_records);
+            println!("Episodic Recalls:    {}", metrics.episodic_recalls);
+            println!("Blackboard Ops:      {} writes, {} reads", metrics.blackboard_writes, metrics.blackboard_reads);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -569,5 +999,152 @@ mod tests {
         format_evaluation_summary(&summary, OutputFormat::Json);
         format_evaluation_summary(&summary, OutputFormat::Tsv);
         format_evaluation_summary(&summary, OutputFormat::Text);
+    }
+
+    #[test]
+    fn test_format_agent_structures() {
+        use crate::agent::{
+            AgentCapability, AgentDefinition, AgentId, AgentRole, AgentTask, EpisodicMemoryEntry,
+            LatencySummary, ReflectionVerdict, RoutingDecision, RoutingStrategy, TaskPriority,
+            TaskStatus, ToolParameter, ToolParamType, WorkflowStatus,
+        };
+
+        let agent = AgentDefinition::builder("coder_1", AgentRole::Coder)
+            .name("Coder Alpha")
+            .capability(AgentCapability::CodeExecution)
+            .capability(AgentCapability::ToolCalling)
+            .system_prompt("You are a professional software engineer.")
+            .max_iterations(5)
+            .build();
+
+        format_agent_list(&[agent.clone()], OutputFormat::Json);
+        format_agent_list(&[agent.clone()], OutputFormat::Tsv);
+        format_agent_list(&[agent], OutputFormat::Text);
+        format_agent_list(&[], OutputFormat::Text);
+
+        let mut task = AgentTask::builder("task_001", "Quicksort")
+            .description("Implement quicksort in Rust")
+            .priority(TaskPriority::High)
+            .build();
+        task.assign(AgentId::new("coder_1"));
+
+        format_task_list(&[task.clone()], OutputFormat::Json);
+        format_task_list(&[task.clone()], OutputFormat::Tsv);
+        format_task_list(&[task.clone()], OutputFormat::Text);
+        format_task_list(&[], OutputFormat::Text);
+
+        format_task_detail(&task, OutputFormat::Json);
+        format_task_detail(&task, OutputFormat::Tsv);
+        format_task_detail(&task, OutputFormat::Text);
+
+        let report = TaskExecutionReport {
+            task_id: task.id.clone(),
+            assigned_agent: AgentId::new("coder_1"),
+            status: TaskStatus::Completed,
+            routing_decision: RoutingDecision::new(
+                task.id.clone(),
+                AgentId::new("coder_1"),
+                RoutingStrategy::Adaptive,
+                0.95,
+                "Best match for code",
+            ),
+            tool_calls_executed: 2,
+            reflection_iterations: 1,
+            reflection_verdict: Some(ReflectionVerdict::Approved),
+            output: Some(json!({"result_text": "Fn implemented"})),
+            execution_time_ms: 120,
+            error: None,
+        };
+
+        format_task_report(&report, OutputFormat::Json);
+        format_task_report(&report, OutputFormat::Tsv);
+        format_task_report(&report, OutputFormat::Text);
+
+        let summary = WorkflowSummary {
+            workflow_id: "wf_1".into(),
+            status: WorkflowStatus::Succeeded,
+            total_tasks: 1,
+            completed_tasks: 1,
+            failed_tasks: 0,
+            total_tool_calls: 2,
+            total_messages: 5,
+            total_duration_ms: 150,
+            reports: vec![report],
+        };
+
+        format_workflow_summary(&summary, OutputFormat::Json);
+        format_workflow_summary(&summary, OutputFormat::Tsv);
+        format_workflow_summary(&summary, OutputFormat::Text);
+
+        let tool = ToolDefinition::new("calculator", "Performs math calculations").with_parameter(
+            ToolParameter {
+                name: "expression".into(),
+                description: "Math string".into(),
+                param_type: ToolParamType::String,
+                required: true,
+                default_value: None,
+            },
+        );
+
+        format_tools_list(&[tool], OutputFormat::Json);
+        format_tools_list(&[], OutputFormat::Text);
+
+        let tool_out = ToolOutput::success("call_1", "calculator", json!({"value": 42}), 5);
+        format_tool_output(&tool_out, OutputFormat::Json);
+        format_tool_output(&tool_out, OutputFormat::Tsv);
+        format_tool_output(&tool_out, OutputFormat::Text);
+
+        let entry = EpisodicMemoryEntry::new(
+            AgentId::new("coder_1"),
+            "Recalled solution for quicksort",
+            0.85,
+        )
+        .with_task_id(task.id)
+        .with_tags(vec!["algo".into()]);
+
+        let scored = ScoredMemory {
+            memory: entry,
+            score: 0.92,
+            recency_score: 0.95,
+            importance_score: 0.85,
+            relevance_score: 0.90,
+        };
+
+        format_agent_memories(&[scored], OutputFormat::Json);
+        format_agent_memories(&[], OutputFormat::Text);
+
+        let metrics = AgentMetricsSnapshot {
+            tasks_submitted: 10,
+            tasks_completed: 9,
+            tasks_failed: 1,
+            tasks_preempted: 0,
+            task_success_rate: 0.9,
+            task_execution_latency: LatencySummary::default(),
+            total_routing_decisions: 10,
+            preemptive_routings: 0,
+            fallback_routings: 1,
+            avg_routing_confidence: 0.95,
+            total_tool_calls: 15,
+            successful_tool_calls: 14,
+            failed_tool_calls: 1,
+            tool_success_rate: 0.933,
+            tool_execution_latency: LatencySummary::default(),
+            tool_usage_by_name: std::collections::HashMap::new(),
+            total_reflection_passes: 8,
+            approved_reflections: 7,
+            revision_reflections: 1,
+            rejected_reflections: 0,
+            escalated_reflections: 0,
+            reflection_approval_rate: 0.875,
+            avg_reflection_iterations: 1.1,
+            blackboard_reads: 20,
+            blackboard_writes: 15,
+            episodic_records: 10,
+            episodic_recalls: 5,
+        };
+
+        format_agent_metrics(&metrics, OutputFormat::Json);
+        format_agent_metrics(&metrics, OutputFormat::Tsv);
+        format_agent_metrics(&metrics, OutputFormat::Text);
     }
 }

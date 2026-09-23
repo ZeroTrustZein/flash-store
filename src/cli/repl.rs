@@ -1,3 +1,8 @@
+use crate::agent::{
+    create_standard_tool_registry, AgentId, AgentPipeline, AgentTask, EpisodicMemoryEntry, TaskId,
+    TaskPriority,
+};
+use crate::cli::agent::seed_standard_agents;
 use crate::cli::formatter::safe_truncate_str;
 use crate::cli::GlobalOpts;
 use crate::engine::FlashStore;
@@ -168,6 +173,13 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
             combined.extend_from_slice(args);
             execute_rag_repl(db, &combined, start_time)
         }
+        "AGENT" => execute_agent_repl(db, args, start_time),
+        s if s.starts_with("AGENT-") || s.starts_with("AGENT_") => {
+            let sub = &s[6..];
+            let mut combined = vec![sub.to_string()];
+            combined.extend_from_slice(args);
+            execute_agent_repl(db, &combined, start_time)
+        }
         "HELP" | "?" => {
             let help = r#"Available REPL commands:
   PUT <key> <value>            Insert or update key-value pair
@@ -186,6 +198,15 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
   RAG LIST [limit]             List indexed documents
   RAG CACHE CLEAR              Clear semantic query cache
   RAG EVAL                     Run IR evaluation metrics benchmark
+  AGENT RUN <prompt>           Execute autonomous agent task
+  AGENT AGENTS                 List active swarm agents
+  AGENT TASKS                  List workflow tasks
+  AGENT GET <task_id>          Inspect task details
+  AGENT TOOLS                  List available tools and schemas
+  AGENT CALL <tool> [args]     Invoke tool with JSON arguments
+  AGENT MEMORY <query|RECORD>  Query or record episodic memory
+  AGENT STATS                  Display agent swarm metrics and latency
+  AGENT CHECKPOINT             Save workflow state to FlashStore
   CLEAR                        Clear terminal screen
   HELP / ?                     Display this help text
   EXIT / QUIT / Q              Exit interactive shell"#;
@@ -488,6 +509,267 @@ pub fn execute_rag_repl(
     }
 }
 
+/// Execute Agent subsystem commands within the REPL.
+pub fn execute_agent_repl(
+    db: &FlashStore,
+    args: &[String],
+    start_time: Instant,
+) -> Result<Option<String>> {
+    if args.is_empty() {
+        return Err(FlashStoreError::InvalidArgument(
+            "Usage: AGENT <RUN|AGENTS|TASKS|GET|TOOLS|CALL|MEMORY|STATS|CHECKPOINT> ...".into(),
+        ));
+    }
+
+    let subcmd = args[0].to_uppercase();
+    let sub_args = &args[1..];
+
+    let arc_db = Arc::new(db.clone());
+    let workflow_id = "repl_agent_session";
+    let mut pipeline = match AgentPipeline::restore_from_store(arc_db.clone(), workflow_id) {
+        Ok(p) => p,
+        Err(_) => AgentPipeline::new(workflow_id).with_store(arc_db.clone()),
+    };
+    seed_standard_agents(&mut pipeline)?;
+
+    match subcmd.as_str() {
+        "RUN" | "TASK" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: AGENT RUN <prompt>".into(),
+                ));
+            }
+            let prompt = sub_args.join(" ");
+            let task_id = format!(
+                "task_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_micros()
+            );
+            let task = AgentTask::builder(task_id.as_str(), prompt.as_str())
+                .description(&prompt)
+                .priority(TaskPriority::Medium)
+                .build();
+            let report = pipeline.run_single_task(task)?;
+            let _ = pipeline.checkpoint();
+            let elapsed = start_time.elapsed();
+            let out = format!(
+                "=== Task [{}] Completed ({:?}) ===\nAssigned: {}\nStatus:   {:?}\nRouting:  {}\nTool Calls: {}\nReflections: {}\nOutput:   {}\n",
+                report.task_id.as_str(),
+                elapsed,
+                report.assigned_agent.as_str(),
+                report.status,
+                report.routing_decision.rationale,
+                report.tool_calls_executed,
+                report.reflection_iterations,
+                report.output.map(|o| o.to_string()).unwrap_or_else(|| "(none)".into())
+            );
+            Ok(Some(out))
+        }
+        "AGENTS" | "LIST-AGENTS" => {
+            let agents: Vec<_> = pipeline.engine().state().active_agents.values().collect();
+            if agents.is_empty() {
+                Ok(Some(format!(
+                    "(no active agents registered) ({:?})",
+                    start_time.elapsed()
+                )))
+            } else {
+                let mut out = format!("Active Swarm Agents ({}):\n", agents.len());
+                for (i, a) in agents.iter().enumerate() {
+                    let caps: Vec<String> = a.capabilities.iter().map(|c| c.to_string()).collect();
+                    out.push_str(&format!(
+                        "{}) [{}] {} (Role: {}, Caps: [{}])\n",
+                        i + 1,
+                        a.id.as_str(),
+                        a.name,
+                        a.role,
+                        caps.join(", ")
+                    ));
+                }
+                out.push_str(&format!("({:?})", start_time.elapsed()));
+                Ok(Some(out))
+            }
+        }
+        "TASKS" | "LIST-TASKS" => {
+            let tasks: Vec<_> = pipeline.engine().state().tasks.values().collect();
+            if tasks.is_empty() {
+                Ok(Some(format!(
+                    "(no workflow tasks found) ({:?})",
+                    start_time.elapsed()
+                )))
+            } else {
+                let mut out = format!("Workflow Tasks ({}):\n", tasks.len());
+                for (i, t) in tasks.iter().enumerate() {
+                    let assigned = t
+                        .assigned_agent
+                        .as_ref()
+                        .map(|a| a.as_str())
+                        .unwrap_or("-");
+                    out.push_str(&format!(
+                        "{}) [{}] \"{}\" | {:?} | agent: {}\n",
+                        i + 1,
+                        t.id.as_str(),
+                        t.title,
+                        t.status,
+                        assigned
+                    ));
+                }
+                out.push_str(&format!("({:?})", start_time.elapsed()));
+                Ok(Some(out))
+            }
+        }
+        "GET" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: AGENT GET <task_id>".into(),
+                ));
+            }
+            let tid = TaskId::new(&sub_args[0]);
+            match pipeline.engine().state().tasks.get(&tid) {
+                Some(t) => {
+                    let assigned = t
+                        .assigned_agent
+                        .as_ref()
+                        .map(|a| a.as_str())
+                        .unwrap_or("(none)");
+                    let out = format!(
+                        "Task:        [{}]\nTitle:       {}\nDescription: {}\nStatus:      {:?}\nPriority:    {}\nAssigned:    {}\nCreated:     {}\n({:?})",
+                        t.id.as_str(),
+                        t.title,
+                        t.description,
+                        t.status,
+                        t.priority.as_str(),
+                        assigned,
+                        t.created_at,
+                        start_time.elapsed()
+                    );
+                    Ok(Some(out))
+                }
+                None => Ok(Some(format!(
+                    "(task not found: '{}' in {:?})",
+                    sub_args[0],
+                    start_time.elapsed()
+                ))),
+            }
+        }
+        "TOOLS" => {
+            let registry = create_standard_tool_registry(Some(arc_db));
+            let defs = registry.list_definitions();
+            let mut out = format!("Registered Tools ({}):\n", defs.len());
+            for (i, d) in defs.iter().enumerate() {
+                out.push_str(&format!("{}) '{}' - {}\n", i + 1, d.name, d.description));
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "CALL" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: AGENT CALL <tool_name> [json_args]".into(),
+                ));
+            }
+            let tool_name = &sub_args[0];
+            let raw_args = if sub_args.len() > 1 {
+                sub_args[1..].join(" ")
+            } else {
+                "{}".into()
+            };
+            let registry = create_standard_tool_registry(Some(arc_db));
+            let tool = registry.get(tool_name).ok_or_else(|| {
+                FlashStoreError::Agent(format!("Tool '{}' not found", tool_name))
+            })?;
+            let json_args: serde_json::Value =
+                serde_json::from_str(&raw_args).map_err(|e| {
+                    FlashStoreError::InvalidArgument(format!("Invalid tool args: {}", e))
+                })?;
+            let start = Instant::now();
+            let res = tool.execute(&json_args)?;
+            let elapsed = start.elapsed();
+            Ok(Some(format!(
+                "Tool '{}' Result (took {:?}):\n{}\n",
+                tool_name,
+                elapsed,
+                serde_json::to_string_pretty(&res).unwrap_or_default()
+            )))
+        }
+        "MEMORY" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: AGENT MEMORY <query|RECORD <text>>".into(),
+                ));
+            }
+            if sub_args[0].eq_ignore_ascii_case("RECORD") {
+                if sub_args.len() < 2 {
+                    return Err(FlashStoreError::InvalidArgument(
+                        "Usage: AGENT MEMORY RECORD <text>".into(),
+                    ));
+                }
+                let content = sub_args[1..].join(" ");
+                let entry = EpisodicMemoryEntry::new(AgentId::new("repl_agent"), content, 0.8);
+                pipeline.memory().record_episode(entry)?;
+                let _ = pipeline.checkpoint();
+                Ok(Some(format!(
+                    "OK (Recorded memory in {:?})",
+                    start_time.elapsed()
+                )))
+            } else {
+                let query = sub_args.join(" ");
+                let recalled = pipeline.memory().recall(&query, 5)?;
+                if recalled.is_empty() {
+                    Ok(Some(format!(
+                        "(no memories matched '{}' in {:?})",
+                        query,
+                        start_time.elapsed()
+                    )))
+                } else {
+                    let mut out =
+                        format!("Recalled Memories ({}) for '{}':\n", recalled.len(), query);
+                    for (i, m) in recalled.iter().enumerate() {
+                        out.push_str(&format!(
+                            "{}) [score: {:.4}, imp: {:.2}] {}\n",
+                            i + 1,
+                            m.score,
+                            m.memory.importance,
+                            m.memory.content
+                        ));
+                    }
+                    out.push_str(&format!("({:?})", start_time.elapsed()));
+                    Ok(Some(out))
+                }
+            }
+        }
+        "STATS" => {
+            let snap = pipeline.metrics_snapshot();
+            let out = format!(
+                "=== Swarm Telemetry & Metrics ===\nTasks Submitted:     {}\nTasks Completed:     {}\nTasks Failed:        {}\nSuccess Rate:        {:.2}%\nTotal Tool Calls:    {}\nTool Success Rate:   {:.2}%\nTotal Reflections:   {}\nEpisodic Records:    {}\nEpisodic Recalls:    {}\n({:?})",
+                snap.tasks_submitted,
+                snap.tasks_completed,
+                snap.tasks_failed,
+                snap.task_success_rate * 100.0,
+                snap.total_tool_calls,
+                snap.tool_success_rate * 100.0,
+                snap.total_reflection_passes,
+                snap.episodic_records,
+                snap.episodic_recalls,
+                start_time.elapsed()
+            );
+            Ok(Some(out))
+        }
+        "CHECKPOINT" => {
+            pipeline.checkpoint()?;
+            Ok(Some(format!(
+                "OK (Workflow checkpoint saved in {:?})",
+                start_time.elapsed()
+            )))
+        }
+        other => Err(FlashStoreError::InvalidArgument(format!(
+            "Unknown AGENT command '{}'. Available: RUN, AGENTS, TASKS, GET, TOOLS, CALL, MEMORY, STATS, CHECKPOINT",
+            other
+        ))),
+    }
+}
+
 /// Run interactive REPL loop using stdin and stdout.
 pub fn run_repl(db: FlashStore, opts: &GlobalOpts) -> Result<()> {
     let stdin = io::stdin();
@@ -650,6 +932,57 @@ mod tests {
 
         let del_res = execute_repl_command(&db, &["RAG".into(), "DEL".into(), "repl_doc1".into()])?;
         assert!(del_res.unwrap().contains("OK"));
+
+        // AGENT commands
+        let run_res = execute_repl_command(
+            &db,
+            &[
+                "AGENT".into(),
+                "RUN".into(),
+                "Process telemetry batch".into(),
+            ],
+        )?;
+        assert!(run_res.unwrap().contains("Completed"));
+
+        let agents_res = execute_repl_command(&db, &["AGENT".into(), "AGENTS".into()])?;
+        assert!(agents_res.unwrap().contains("Active Swarm Agents"));
+
+        let tasks_res = execute_repl_command(&db, &["AGENT".into(), "TASKS".into()])?;
+        assert!(tasks_res.unwrap().contains("Workflow Tasks"));
+
+        let tools_res = execute_repl_command(&db, &["AGENT".into(), "TOOLS".into()])?;
+        assert!(tools_res.unwrap().contains("Registered Tools"));
+
+        let call_res = execute_repl_command(
+            &db,
+            &[
+                "AGENT".into(),
+                "CALL".into(),
+                "calculator".into(),
+                "{\"expression\": \"100 * 2\"}".into(),
+            ],
+        )?;
+        assert!(call_res.unwrap().contains("200"));
+
+        let mem_rec = execute_repl_command(
+            &db,
+            &[
+                "AGENT".into(),
+                "MEMORY".into(),
+                "RECORD".into(),
+                "Completed telemetry data processing batch successfully".into(),
+            ],
+        )?;
+        assert!(mem_rec.unwrap().contains("OK"));
+
+        let mem_query = execute_repl_command(&db, &["AGENT".into(), "MEMORY".into(), "telemetry".into()])?;
+        assert!(mem_query.unwrap().contains("Recalled Memories"));
+
+        let agent_stats = execute_repl_command(&db, &["AGENT".into(), "STATS".into()])?;
+        assert!(agent_stats.unwrap().contains("Swarm Telemetry"));
+
+        let agent_cp = execute_repl_command(&db, &["AGENT".into(), "CHECKPOINT".into()])?;
+        assert!(agent_cp.unwrap().contains("OK"));
 
         Ok(())
     }

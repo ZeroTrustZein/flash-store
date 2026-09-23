@@ -1,9 +1,11 @@
+pub mod agent;
 pub mod batch_parser;
 pub mod formatter;
 pub mod inspect;
 pub mod rag;
 pub mod repl;
 
+pub use agent::{open_agent_pipeline, AgentCmd};
 pub use rag::{open_rag_pipeline, RagCmd};
 
 use crate::config::OptionsBuilder;
@@ -131,6 +133,11 @@ pub enum Cmd {
     Rag {
         #[command(subcommand)]
         command: rag::RagCmd,
+    },
+    /// Autonomous multi-agent workflow orchestration, task execution, and tools.
+    Agent {
+        #[command(subcommand)]
+        command: agent::AgentCmd,
     },
 }
 
@@ -306,6 +313,9 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         }
         Cmd::Rag { command } => {
             rag::run_rag_command(command, opts)?;
+        }
+        Cmd::Agent { command } => {
+            agent::run_agent_command(command, opts)?;
         }
     }
     Ok(())
