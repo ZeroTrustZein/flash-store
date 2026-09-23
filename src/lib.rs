@@ -87,12 +87,18 @@ pub mod types;
 pub mod wal;
 
 pub use agent::{
-    AgentCapability, AgentDefinition, AgentDefinitionBuilder, AgentId, AgentMessage, AgentRole,
-    AgentStorageKey, AgentTask, AgentTaskBuilder, DefaultTaskRouter, MessageRole,
-    ReflectionCritique, ReflectionState, ReflectionStep, ReflectionVerdict, Reflector,
-    RoutingDecision, RoutingStrategy, RuleBasedReflector, TaskId, TaskPriority, TaskRouter,
-    TaskStatus, Tool, ToolCall, ToolDefinition, ToolOutput, ToolParamType, ToolParameter,
-    ToolRegistry, WorkflowState, WorkflowStatus,
+    compute_aggregate_score, create_standard_tool_registry, format_revision_prompt,
+    score_capability_match, score_priority_tier, score_role_affinity, score_workload,
+    verify_critical_invariants, AdaptiveRoutingWeights, AdaptiveTaskRouter, AgentCapability,
+    AgentDefinition, AgentDefinitionBuilder, AgentEngine, AgentId, AgentMessage, AgentRole,
+    AgentStorageKey, AgentTask, AgentTaskBuilder, CalculatorTool, CompositeReflector,
+    ConvergenceConfig, ConvergenceEvaluator, DefaultTaskRouter, EchoTool, EvaluationCriterion,
+    HeuristicReflector, KvDeleteTool, KvGetTool, KvPutTool, KvScanTool, LoadBalancingRouter,
+    MessageRole, PriorityPreemptiveRouter, ReflectionCritique, ReflectionEngine, ReflectionState,
+    ReflectionStep, ReflectionVerdict, Reflector, RoutingDecision, RoutingStrategy,
+    RuleBasedReflector, TaskExecutionReport, TaskGraph, TaskId, TaskPriority, TaskRouter,
+    TaskStatus, Tool, ToolCall, ToolDefinition, ToolDispatcher, ToolOutput, ToolParamType,
+    ToolParameter, ToolRegistry, WorkflowState, WorkflowStatus, WorkflowSummary,
 };
 pub use batch::WriteBatch;
 pub use cache::{BlockCache, LruBlockCache};
@@ -128,12 +134,18 @@ pub use types::{
 
 pub mod prelude {
     pub use crate::agent::{
-        AgentCapability, AgentDefinition, AgentDefinitionBuilder, AgentId, AgentMessage, AgentRole,
-        AgentStorageKey, AgentTask, AgentTaskBuilder, DefaultTaskRouter, MessageRole,
-        ReflectionCritique, ReflectionState, ReflectionStep, ReflectionVerdict, Reflector,
-        RoutingDecision, RoutingStrategy, RuleBasedReflector, TaskId, TaskPriority, TaskRouter,
-        TaskStatus, Tool, ToolCall, ToolDefinition, ToolOutput, ToolParamType, ToolParameter,
-        ToolRegistry, WorkflowState, WorkflowStatus,
+        compute_aggregate_score, create_standard_tool_registry, format_revision_prompt,
+        score_capability_match, score_priority_tier, score_role_affinity, score_workload,
+        verify_critical_invariants, AdaptiveRoutingWeights, AdaptiveTaskRouter, AgentCapability,
+        AgentDefinition, AgentDefinitionBuilder, AgentEngine, AgentId, AgentMessage, AgentRole,
+        AgentStorageKey, AgentTask, AgentTaskBuilder, CalculatorTool, CompositeReflector,
+        ConvergenceConfig, ConvergenceEvaluator, DefaultTaskRouter, EchoTool, EvaluationCriterion,
+        HeuristicReflector, KvDeleteTool, KvGetTool, KvPutTool, KvScanTool, LoadBalancingRouter,
+        MessageRole, PriorityPreemptiveRouter, ReflectionCritique, ReflectionEngine,
+        ReflectionState, ReflectionStep, ReflectionVerdict, Reflector, RoutingDecision,
+        RoutingStrategy, RuleBasedReflector, TaskExecutionReport, TaskGraph, TaskId, TaskPriority,
+        TaskRouter, TaskStatus, Tool, ToolCall, ToolDefinition, ToolDispatcher, ToolOutput,
+        ToolParamType, ToolParameter, ToolRegistry, WorkflowState, WorkflowStatus, WorkflowSummary,
     };
     pub use crate::batch::WriteBatch;
     pub use crate::cache::{BlockCache, LruBlockCache};

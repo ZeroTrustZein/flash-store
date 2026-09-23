@@ -498,10 +498,14 @@ pub enum RoutingStrategy {
     CapabilityBased,
     /// Fair-share round-robin among eligible candidates.
     RoundRobin,
+    /// Balance active concurrency by selecting the least loaded capable agent.
+    LeastLoaded,
     /// Direct routing prioritized by task urgency and agent tier.
     PriorityTiered,
     /// Reflection-guided routing adapting based on prior critique history.
     ReflectionGuided,
+    /// Multi-criteria adaptive routing balancing capability, role, load, and priority.
+    Adaptive,
 }
 
 /// The outcome and rationale of routing a task to an agent.
@@ -762,6 +766,18 @@ impl ToolOutput {
             error: Some(err_str),
         }
     }
+
+    /// Returns true if tool execution succeeded.
+    #[inline]
+    pub fn is_success(&self) -> bool {
+        self.success
+    }
+
+    /// Returns true if tool execution failed with an error.
+    #[inline]
+    pub fn is_error(&self) -> bool {
+        !self.success
+    }
 }
 
 // ============================================================================
@@ -924,6 +940,11 @@ impl ReflectionState {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|s| s.candidate_output.as_str())
+    }
+
+    /// Returns the most recent reflection step, if any.
+    pub fn latest_step(&self) -> Option<&ReflectionStep> {
+        self.steps.last()
     }
 }
 
