@@ -35,6 +35,15 @@ pub enum FlashStoreError {
     #[error("RAG error: {0}")]
     Rag(String),
 
+    #[error("Agent workflow error: {0}")]
+    Agent(String),
+
+    #[error("Tool execution error in `{tool}`: {reason}")]
+    ToolError { tool: String, reason: String },
+
+    #[error("Reflection error: {0}")]
+    Reflection(String),
+
     #[error("Other error: {0}")]
     Other(String),
 }

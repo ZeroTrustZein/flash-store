@@ -70,6 +70,7 @@
 //! # }
 //! ```
 
+pub mod agent;
 pub mod batch;
 pub mod cache;
 pub mod cli;
@@ -85,6 +86,14 @@ pub mod sstable;
 pub mod types;
 pub mod wal;
 
+pub use agent::{
+    AgentCapability, AgentDefinition, AgentDefinitionBuilder, AgentId, AgentMessage, AgentRole,
+    AgentStorageKey, AgentTask, AgentTaskBuilder, DefaultTaskRouter, MessageRole,
+    ReflectionCritique, ReflectionState, ReflectionStep, ReflectionVerdict, Reflector,
+    RoutingDecision, RoutingStrategy, RuleBasedReflector, TaskId, TaskPriority, TaskRouter,
+    TaskStatus, Tool, ToolCall, ToolDefinition, ToolOutput, ToolParamType, ToolParameter,
+    ToolRegistry, WorkflowState, WorkflowStatus,
+};
 pub use batch::WriteBatch;
 pub use cache::{BlockCache, LruBlockCache};
 pub use cli::{open_rag_pipeline, Cmd, GlobalOpts, OutputFormat, RagCmd};
@@ -118,6 +127,14 @@ pub use types::{
 };
 
 pub mod prelude {
+    pub use crate::agent::{
+        AgentCapability, AgentDefinition, AgentDefinitionBuilder, AgentId, AgentMessage, AgentRole,
+        AgentStorageKey, AgentTask, AgentTaskBuilder, DefaultTaskRouter, MessageRole,
+        ReflectionCritique, ReflectionState, ReflectionStep, ReflectionVerdict, Reflector,
+        RoutingDecision, RoutingStrategy, RuleBasedReflector, TaskId, TaskPriority, TaskRouter,
+        TaskStatus, Tool, ToolCall, ToolDefinition, ToolOutput, ToolParamType, ToolParameter,
+        ToolRegistry, WorkflowState, WorkflowStatus,
+    };
     pub use crate::batch::WriteBatch;
     pub use crate::cache::{BlockCache, LruBlockCache};
     pub use crate::cli::{open_rag_pipeline, Cmd, GlobalOpts, OutputFormat, RagCmd};
