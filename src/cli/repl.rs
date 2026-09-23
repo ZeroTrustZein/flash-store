@@ -959,7 +959,7 @@ mod tests {
                 "AGENT".into(),
                 "CALL".into(),
                 "calculator".into(),
-                "{\"expression\": \"100 * 2\"}".into(),
+                "{\"operation\": \"mul\", \"a\": 100, \"b\": 2}".into(),
             ],
         )?;
         assert!(call_res.unwrap().contains("200"));
@@ -975,7 +975,8 @@ mod tests {
         )?;
         assert!(mem_rec.unwrap().contains("OK"));
 
-        let mem_query = execute_repl_command(&db, &["AGENT".into(), "MEMORY".into(), "telemetry".into()])?;
+        let mem_query =
+            execute_repl_command(&db, &["AGENT".into(), "MEMORY".into(), "telemetry".into()])?;
         assert!(mem_query.unwrap().contains("Recalled Memories"));
 
         let agent_stats = execute_repl_command(&db, &["AGENT".into(), "STATS".into()])?;

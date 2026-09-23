@@ -388,7 +388,9 @@ pub fn run_agent_command(cmd: AgentCmd, opts: &GlobalOpts) -> Result<()> {
         } => {
             let mut pipeline = open_agent_pipeline(opts, &workflow)?;
             let prompt_text = prompt.or(prompt_flag).ok_or_else(|| {
-                FlashStoreError::InvalidArgument("Task prompt or description must be provided".into())
+                FlashStoreError::InvalidArgument(
+                    "Task prompt or description must be provided".into(),
+                )
             })?;
             let fmt = parse_output_format(&format, opts.json);
 
@@ -414,8 +416,8 @@ pub fn run_agent_command(cmd: AgentCmd, opts: &GlobalOpts) -> Result<()> {
             }
 
             if let Some(inp) = input {
-                let parsed_val: serde_json::Value = serde_json::from_str(&inp)
-                    .unwrap_or_else(|_| serde_json::Value::String(inp));
+                let parsed_val: serde_json::Value =
+                    serde_json::from_str(&inp).unwrap_or(serde_json::Value::String(inp));
                 builder = builder.input_context(parsed_val);
             }
 
@@ -491,8 +493,8 @@ pub fn run_agent_command(cmd: AgentCmd, opts: &GlobalOpts) -> Result<()> {
         } => {
             let mut pipeline = open_agent_pipeline(opts, &workflow)?;
             let parsed_role = parse_role(&role);
-            let mut builder = AgentDefinition::builder(id.as_str(), parsed_role)
-                .max_iterations(max_iterations);
+            let mut builder =
+                AgentDefinition::builder(id.as_str(), parsed_role).max_iterations(max_iterations);
 
             if let Some(n) = name {
                 builder = builder.name(n);
@@ -585,7 +587,10 @@ pub fn run_agent_command(cmd: AgentCmd, opts: &GlobalOpts) -> Result<()> {
             }
         }
 
-        AgentCmd::Tools { workflow: _workflow, format } => {
+        AgentCmd::Tools {
+            workflow: _workflow,
+            format,
+        } => {
             let fmt = parse_output_format(&format, opts.json);
             let db = Arc::new(open_db(opts)?);
             let registry = create_standard_tool_registry(Some(db));
@@ -685,7 +690,10 @@ mod tests {
         assert_eq!(parse_role("planner"), AgentRole::Planner);
         assert_eq!(parse_role("coder"), AgentRole::Coder);
         assert_eq!(parse_role("critic"), AgentRole::Critic);
-        assert_eq!(parse_role("custom_bot"), AgentRole::Custom("custom_bot".into()));
+        assert_eq!(
+            parse_role("custom_bot"),
+            AgentRole::Custom("custom_bot".into())
+        );
 
         let caps = parse_capabilities("code_execution,tool_calling,storage_ops");
         assert!(caps.contains(&AgentCapability::CodeExecution));
@@ -765,7 +773,7 @@ mod tests {
         run_agent_command(
             AgentCmd::Call {
                 tool: "calculator".into(),
-                args: "{\"expression\": \"15 + 27\"}".into(),
+                args: "{\"operation\": \"add\", \"a\": 15, \"b\": 27}".into(),
                 workflow: "test_wf".into(),
                 format: "text".into(),
             },

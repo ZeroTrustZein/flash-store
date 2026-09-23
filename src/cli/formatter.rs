@@ -620,7 +620,11 @@ pub fn format_task_detail(task: &AgentTask, format: OutputFormat) {
             );
         }
         OutputFormat::Tsv => {
-            let assigned = task.assigned_agent.as_ref().map(|a| a.as_str()).unwrap_or("-");
+            let assigned = task
+                .assigned_agent
+                .as_ref()
+                .map(|a| a.as_str())
+                .unwrap_or("-");
             println!(
                 "{}\t{}\t{}\t{:?}\t{}",
                 task.id.as_str(),
@@ -805,7 +809,11 @@ pub fn format_tool_output(output: &ToolOutput, format: OutputFormat) {
         OutputFormat::Tsv => {
             println!(
                 "{}\t{}\t{}\t{}\t{}",
-                output.call_id, output.tool_name, output.success, output.execution_time_ms, output.result
+                output.call_id,
+                output.tool_name,
+                output.success,
+                output.execution_time_ms,
+                output.result
             );
         }
         OutputFormat::Text => {
@@ -897,17 +905,38 @@ pub fn format_agent_metrics(metrics: &AgentMetricsSnapshot, format: OutputFormat
             println!("Tasks Completed:     {}", metrics.tasks_completed);
             println!("Tasks Failed:        {}", metrics.tasks_failed);
             println!("Tasks Preempted:     {}", metrics.tasks_preempted);
-            println!("Success Rate:        {:.2}%", metrics.task_success_rate * 100.0);
-            println!("Task Latency (avg):  {:.2} ms", metrics.task_execution_latency.avg_ms);
-            println!("Task Latency (max):  {:.2} ms", metrics.task_execution_latency.max_ms);
+            println!(
+                "Success Rate:        {:.2}%",
+                metrics.task_success_rate * 100.0
+            );
+            println!(
+                "Task Latency (avg):  {:.2} ms",
+                metrics.task_execution_latency.avg_ms
+            );
+            println!(
+                "Task Latency (max):  {:.2} ms",
+                metrics.task_execution_latency.max_ms
+            );
             println!("Total Tool Calls:    {}", metrics.total_tool_calls);
-            println!("Tool Success Rate:   {:.2}%", metrics.tool_success_rate * 100.0);
-            println!("Tool Latency (avg):  {:.2} ms", metrics.tool_execution_latency.avg_ms);
+            println!(
+                "Tool Success Rate:   {:.2}%",
+                metrics.tool_success_rate * 100.0
+            );
+            println!(
+                "Tool Latency (avg):  {:.2} ms",
+                metrics.tool_execution_latency.avg_ms
+            );
             println!("Total Reflections:   {}", metrics.total_reflection_passes);
-            println!("Reflection Approval: {:.2}%", metrics.reflection_approval_rate * 100.0);
+            println!(
+                "Reflection Approval: {:.2}%",
+                metrics.reflection_approval_rate * 100.0
+            );
             println!("Episodic Records:    {}", metrics.episodic_records);
             println!("Episodic Recalls:    {}", metrics.episodic_recalls);
-            println!("Blackboard Ops:      {} writes, {} reads", metrics.blackboard_writes, metrics.blackboard_reads);
+            println!(
+                "Blackboard Ops:      {} writes, {} reads",
+                metrics.blackboard_writes, metrics.blackboard_reads
+            );
         }
     }
 }
@@ -1006,7 +1035,7 @@ mod tests {
         use crate::agent::{
             AgentCapability, AgentDefinition, AgentId, AgentRole, AgentTask, EpisodicMemoryEntry,
             LatencySummary, ReflectionVerdict, RoutingDecision, RoutingStrategy, TaskPriority,
-            TaskStatus, ToolParameter, ToolParamType, WorkflowStatus,
+            TaskStatus, ToolParamType, ToolParameter, WorkflowStatus,
         };
 
         let agent = AgentDefinition::builder("coder_1", AgentRole::Coder)
@@ -1017,8 +1046,8 @@ mod tests {
             .max_iterations(5)
             .build();
 
-        format_agent_list(&[agent.clone()], OutputFormat::Json);
-        format_agent_list(&[agent.clone()], OutputFormat::Tsv);
+        format_agent_list(std::slice::from_ref(&agent), OutputFormat::Json);
+        format_agent_list(std::slice::from_ref(&agent), OutputFormat::Tsv);
         format_agent_list(&[agent], OutputFormat::Text);
         format_agent_list(&[], OutputFormat::Text);
 
@@ -1028,9 +1057,9 @@ mod tests {
             .build();
         task.assign(AgentId::new("coder_1"));
 
-        format_task_list(&[task.clone()], OutputFormat::Json);
-        format_task_list(&[task.clone()], OutputFormat::Tsv);
-        format_task_list(&[task.clone()], OutputFormat::Text);
+        format_task_list(std::slice::from_ref(&task), OutputFormat::Json);
+        format_task_list(std::slice::from_ref(&task), OutputFormat::Tsv);
+        format_task_list(std::slice::from_ref(&task), OutputFormat::Text);
         format_task_list(&[], OutputFormat::Text);
 
         format_task_detail(&task, OutputFormat::Json);

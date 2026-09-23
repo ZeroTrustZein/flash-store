@@ -2,11 +2,15 @@ use bytes::Bytes;
 use flash_store::cli::batch_parser::{parse_json_ops, parse_plain_lines};
 use flash_store::cli::formatter::{format_kv_pairs, format_stats};
 use flash_store::cli::repl::{execute_repl_command, tokenize_line};
-use flash_store::cli::{open_db, open_rag_pipeline, run, Cmd, GlobalOpts, OutputFormat, RagCmd};
+use flash_store::cli::{
+    open_agent_pipeline, open_db, open_rag_pipeline, run, AgentCmd, Cmd, GlobalOpts, OutputFormat,
+    RagCmd,
+};
 use flash_store::config::OptionsBuilder;
 use flash_store::engine::{FlashStore, Stats};
 use flash_store::error::Result;
 use std::fs;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]
@@ -951,6 +955,435 @@ fn test_cli_rag_error_handling_and_validation() -> Result<()> {
 
     // 9. REPL invalid cache subcommand
     let res = execute_repl_command(&db, &["RAG".into(), "CACHE".into(), "INVALID".into()]);
+    assert!(res.is_err());
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_agent_lifecycle_and_execution() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Register custom agent
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Register {
+                id: "sec_auditor".into(),
+                name: Some("Security Auditor".into()),
+                role: "critic".into(),
+                capabilities: Some("reflection,text_generation".into()),
+                prompt: Some("Audit all actions for security vulnerabilities".into()),
+                max_iterations: 8,
+                workflow: "audit_wf".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 2. List agents in text, JSON, and TSV
+    for fmt in ["text", "json", "tsv"] {
+        run(
+            Cmd::Agent {
+                command: AgentCmd::Agents {
+                    workflow: "audit_wf".into(),
+                    format: fmt.into(),
+                },
+            },
+            &opts,
+        )?;
+    }
+
+    // 3. Run autonomous task
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Run {
+                prompt: Some("Execute mathematical calculation of compound interest".into()),
+                prompt_flag: None,
+                id: Some("task_interest".into()),
+                priority: "high".into(),
+                agent: None,
+                capabilities: Some("tool_calling,code_execution".into()),
+                input: Some("{\"rate\": 0.05, \"principal\": 1000}".into()),
+                workflow: "audit_wf".into(),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 4. Inspect task in text and json
+    run(
+        Cmd::Agent {
+            command: AgentCmd::GetTask {
+                id: "task_interest".into(),
+                workflow: "audit_wf".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+    run(
+        Cmd::Agent {
+            command: AgentCmd::GetTask {
+                id: "task_interest".into(),
+                workflow: "audit_wf".into(),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 5. List tasks
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Tasks {
+                workflow: "audit_wf".into(),
+                status: None,
+                format: "tsv".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 6. Tools inspection & direct invocation
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Tools {
+                workflow: "audit_wf".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Call {
+                tool: "calculator".into(),
+                args: "{\"operation\": \"mul\", \"a\": 12, \"b\": 8}".into(),
+                workflow: "audit_wf".into(),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 7. Memory operations
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Memory {
+                query: None,
+                record: Some("Audited compound interest task for input validation".into()),
+                agent: "sec_auditor".into(),
+                importance: 0.85,
+                limit: 5,
+                workflow: "audit_wf".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Memory {
+                query: Some("compound interest validation".into()),
+                record: None,
+                agent: "sec_auditor".into(),
+                importance: 0.5,
+                limit: 5,
+                workflow: "audit_wf".into(),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 8. Stats & Checkpoint
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Stats {
+                workflow: "audit_wf".into(),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Checkpoint {
+                workflow: "audit_wf".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 9. Reopen pipeline and verify persisted state
+    let restored_pipeline = open_agent_pipeline(&opts, "audit_wf")?;
+    assert!(restored_pipeline
+        .engine()
+        .state()
+        .active_agents
+        .contains_key(&flash_store::agent::AgentId::new("sec_auditor")));
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_agent_workflow_batch_file() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    let workflow_json = r#"{
+        "workflow_id": "batch_analysis_dag",
+        "tasks": [
+            {
+                "id": "step_1",
+                "title": "Data Ingestion",
+                "description": "Ingest sensory metrics into working store",
+                "priority": "high",
+                "depends_on": []
+            },
+            {
+                "id": "step_2",
+                "title": "Data Transformation",
+                "description": "Calculate statistical aggregates",
+                "priority": "medium",
+                "depends_on": ["step_1"]
+            },
+            {
+                "id": "step_3",
+                "title": "Result Verification",
+                "description": "Validate invariants and generate report",
+                "priority": "critical",
+                "depends_on": ["step_2"]
+            }
+        ]
+    }"#;
+
+    let file_path = dir.path().join("workflow_dag.json");
+    fs::write(&file_path, workflow_json)?;
+
+    // Execute batch DAG workflow
+    run(
+        Cmd::Agent {
+            command: AgentCmd::Workflow {
+                file: file_path,
+                id: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // Verify all tasks recorded
+    let pipeline = open_agent_pipeline(&opts, "batch_analysis_dag")?;
+    let state = pipeline.engine().state();
+    assert_eq!(state.tasks.len(), 3);
+    assert!(state
+        .tasks
+        .contains_key(&flash_store::agent::TaskId::new("step_1")));
+    assert!(state
+        .tasks
+        .contains_key(&flash_store::agent::TaskId::new("step_2")));
+    assert!(state
+        .tasks
+        .contains_key(&flash_store::agent::TaskId::new("step_3")));
+
+    Ok(())
+}
+
+#[test]
+fn test_repl_agent_full_session() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    let db = open_db(&opts)?;
+
+    // 1. HELP should list AGENT commands
+    let help = execute_repl_command(&db, &["HELP".into()])?;
+    assert!(help.as_ref().unwrap().contains("AGENT RUN"));
+    assert!(help.as_ref().unwrap().contains("AGENT TOOLS"));
+
+    // 2. AGENT AGENTS
+    let agents_res = execute_repl_command(&db, &["AGENT".into(), "AGENTS".into()])?;
+    assert!(agents_res.unwrap().contains("Active Swarm Agents"));
+
+    // 3. AGENT TOOLS
+    let tools_res = execute_repl_command(&db, &["AGENT".into(), "TOOLS".into()])?;
+    assert!(tools_res.unwrap().contains("Registered Tools"));
+
+    // 4. AGENT CALL
+    let call_res = execute_repl_command(
+        &db,
+        &[
+            "AGENT".into(),
+            "CALL".into(),
+            "calculator".into(),
+            "{\"operation\": \"add\", \"a\": 40, \"b\": 2}".into(),
+        ],
+    )?;
+    assert!(call_res.unwrap().contains("42"));
+
+    // 5. AGENT RUN
+    let run_res = execute_repl_command(
+        &db,
+        &["AGENT".into(), "RUN".into(), "Summarize memory logs".into()],
+    )?;
+    assert!(run_res.unwrap().contains("Completed"));
+
+    // 6. AGENT TASKS
+    let tasks_res = execute_repl_command(&db, &["AGENT".into(), "TASKS".into()])?;
+    assert!(tasks_res.unwrap().contains("Workflow Tasks"));
+
+    // 7. AGENT MEMORY RECORD & RECALL
+    let mem_rec = execute_repl_command(
+        &db,
+        &[
+            "AGENT".into(),
+            "MEMORY".into(),
+            "RECORD".into(),
+            "System telemetry check: memory consumption optimal".into(),
+        ],
+    )?;
+    assert!(mem_rec.unwrap().contains("OK"));
+
+    let mem_recall = execute_repl_command(
+        &db,
+        &[
+            "AGENT".into(),
+            "MEMORY".into(),
+            "consumption optimal".into(),
+        ],
+    )?;
+    assert!(mem_recall.unwrap().contains("Recalled Memories"));
+
+    // 8. AGENT STATS
+    let stats_res = execute_repl_command(&db, &["AGENT".into(), "STATS".into()])?;
+    assert!(stats_res.unwrap().contains("Swarm Telemetry"));
+
+    // 9. AGENT CHECKPOINT
+    let cp_res = execute_repl_command(&db, &["AGENT".into(), "CHECKPOINT".into()])?;
+    assert!(cp_res.unwrap().contains("OK"));
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_agent_error_handling_and_validation() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Run without prompt
+    let res = run(
+        Cmd::Agent {
+            command: AgentCmd::Run {
+                prompt: None,
+                prompt_flag: None,
+                id: None,
+                priority: "medium".into(),
+                agent: None,
+                capabilities: None,
+                input: None,
+                workflow: "default".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 2. Call missing tool
+    let res = run(
+        Cmd::Agent {
+            command: AgentCmd::Call {
+                tool: "non_existent_tool_xyz".into(),
+                args: "{}".into(),
+                workflow: "default".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 3. Call tool with invalid JSON arguments
+    let res = run(
+        Cmd::Agent {
+            command: AgentCmd::Call {
+                tool: "calculator".into(),
+                args: "not-json-string".into(),
+                workflow: "default".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 4. Memory without query or record
+    let res = run(
+        Cmd::Agent {
+            command: AgentCmd::Memory {
+                query: None,
+                record: None,
+                agent: "default".into(),
+                importance: 0.5,
+                limit: 10,
+                workflow: "default".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 5. Workflow with non-existent file
+    let res = run(
+        Cmd::Agent {
+            command: AgentCmd::Workflow {
+                file: PathBuf::from("non_existent_workflow_file_1234.json"),
+                id: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 6. REPL invalid agent subcommands
+    let db = open_db(&opts)?;
+    let res = execute_repl_command(&db, &["AGENT".into(), "UNKNOWN_SUBCOMMAND".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["AGENT".into(), "RUN".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["AGENT".into(), "GET".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["AGENT".into(), "CALL".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["AGENT".into(), "MEMORY".into()]);
     assert!(res.is_err());
 
     Ok(())

@@ -289,7 +289,7 @@ impl AgentMemoryStore {
 
             // 2. Recency score (exponential decay)
             let age_secs = current_ts.saturating_sub(ep.timestamp) as f32;
-            let lambda = 0.693147 / self.weights.recency_half_life_secs.max(1.0);
+            let lambda = std::f32::consts::LN_2 / self.weights.recency_half_life_secs.max(1.0);
             let recency = (-lambda * age_secs).exp().clamp(0.0, 1.0);
 
             // 3. Importance score
