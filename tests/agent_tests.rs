@@ -707,3 +707,305 @@ fn test_agent_engine_complete_pipeline_with_tools_and_reflection() {
         .unwrap();
     assert!(raw_val["tool_outputs"][0]["success"].as_bool().unwrap());
 }
+
+#[test]
+fn test_agent_store_adapter_persistence_and_hydration() {
+    let dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+    let adapter = AgentStoreAdapter::new(store);
+
+    // 1. Agent definition persistence
+    let agent = AgentDefinition::builder("agent-arch", AgentRole::Planner)
+        .name("Architect")
+        .capability(AgentCapability::TextGeneration)
+        .capability(AgentCapability::MemoryRetrieval)
+        .build();
+    adapter.persist_agent(&agent).unwrap();
+
+    let loaded_agent = adapter.load_agent(&agent.id).unwrap().expect("Agent must exist");
+    assert_eq!(loaded_agent.name, "Architect");
+    assert_eq!(loaded_agent.role, AgentRole::Planner);
+
+    let all_agents = adapter.list_agents().unwrap();
+    assert_eq!(all_agents.len(), 1);
+    assert_eq!(all_agents[0].id, agent.id);
+
+    // 2. Task persistence and listing by status
+    let mut task1 = AgentTask::builder("task-101", "Compile binary")
+        .priority(TaskPriority::High)
+        .build();
+    task1.start();
+    let task2 = AgentTask::builder("task-102", "Run test suite")
+        .priority(TaskPriority::Medium)
+        .build();
+
+    adapter.persist_tasks_batch(&[task1.clone(), task2.clone()]).unwrap();
+
+    let loaded_t1 = adapter.load_task(&task1.id).unwrap().expect("Task 101 must exist");
+    assert_eq!(loaded_t1.status, TaskStatus::InProgress);
+
+    let running_tasks = adapter.list_tasks_by_status(TaskStatus::InProgress).unwrap();
+    assert_eq!(running_tasks.len(), 1);
+    assert_eq!(running_tasks[0].id, task1.id);
+
+    let pending_tasks = adapter.list_tasks_by_status(TaskStatus::Pending).unwrap();
+    assert_eq!(pending_tasks.len(), 1);
+    assert_eq!(pending_tasks[0].id, task2.id);
+
+    // 3. Message persistence and chronological load
+    let msg1 = AgentMessage::new("m1", "agent-arch", MessageRole::User, "Hello swarm");
+    let mut msg2 = AgentMessage::new("m2", "agent-arch", MessageRole::Assistant, "Ready");
+    msg2.timestamp = msg1.timestamp + 10;
+
+    adapter.persist_message("wf-demo", &msg1).unwrap();
+    adapter.persist_message("wf-demo", &msg2).unwrap();
+
+    let msgs = adapter.load_messages("wf-demo").unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0].message_id, "m1");
+    assert_eq!(msgs[1].message_id, "m2");
+
+    // 4. Workflow full checkpoint
+    let mut wf_state = WorkflowState::new("wf-demo");
+    wf_state.register_agent(agent.clone());
+    wf_state.add_task(task1.clone());
+    wf_state.post_message(msg1.clone());
+
+    adapter.checkpoint_full_workflow(&wf_state).unwrap();
+    let loaded_wf = adapter.load_workflow_state("wf-demo").unwrap().expect("Workflow must exist");
+    assert_eq!(loaded_wf.workflow_id, "wf-demo");
+    assert_eq!(loaded_wf.tasks.len(), 1);
+    assert_eq!(loaded_wf.active_agents.len(), 1);
+
+    // 5. Deletion
+    assert!(adapter.delete_agent(&agent.id).unwrap());
+    assert!(!adapter.delete_agent(&agent.id).unwrap());
+    assert!(adapter.load_agent(&agent.id).unwrap().is_none());
+}
+
+#[test]
+fn test_agent_memory_store_blackboard_and_episodic_recall() {
+    let memory = AgentMemoryStore::new(10);
+
+    // 1. Blackboard operations
+    memory.set_blackboard("infra:port", serde_json::json!(8080));
+    memory.set_blackboard("infra:host", serde_json::json!("127.0.0.1"));
+    assert_eq!(memory.get_blackboard("infra:port").unwrap(), 8080);
+    assert!(memory.contains_blackboard("infra:host"));
+
+    let snap = memory.snapshot_blackboard();
+    assert_eq!(snap.len(), 2);
+
+    memory.remove_blackboard("infra:port");
+    assert!(!memory.contains_blackboard("infra:port"));
+
+    // 2. Episodic memory recording and retrieval
+    let agent_id = AgentId::new("researcher");
+    let ep1 = EpisodicMemoryEntry::new(agent_id.clone(), "Compiled RocksDB engine with SSE4 SIMD support", 0.9)
+        .with_tags(vec!["database".into(), "compilation".into()]);
+    let ep2 = EpisodicMemoryEntry::new(agent_id.clone(), "Investigated LSM tree write amplification benchmarks", 0.8)
+        .with_tags(vec!["database".into(), "benchmarks".into()]);
+    let ep3 = EpisodicMemoryEntry::new(AgentId::new("tester"), "Flaky network timeout test resolved", 0.5)
+        .with_tags(vec!["testing".into()]);
+
+    memory.record_episode(ep1).unwrap();
+    memory.record_episode(ep2).unwrap();
+    memory.record_episode(ep3).unwrap();
+
+    assert_eq!(memory.episode_count(), 3);
+
+    let res_by_agent = memory.get_episodes_by_agent(&agent_id);
+    assert_eq!(res_by_agent.len(), 2);
+
+    let res_by_tag = memory.get_episodes_by_tag("database");
+    assert_eq!(res_by_tag.len(), 2);
+
+    // 3. Recall ranking with lexical overlap
+    let recalled = memory.recall("LSM tree benchmarks", 2).unwrap();
+    assert!(!recalled.is_empty());
+    assert!(recalled[0].memory.content.contains("LSM tree"));
+    assert!(recalled[0].score > 0.0);
+
+    // 4. Persistence round-trip with FlashStore
+    let dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+    let adapter = AgentStoreAdapter::new(store);
+
+    memory.persist_to_store(&adapter, "test_ns").unwrap();
+
+    let fresh_memory = AgentMemoryStore::new(10);
+    let loaded = fresh_memory.load_from_store(&adapter, "test_ns").unwrap();
+    assert!(loaded);
+    assert_eq!(fresh_memory.episode_count(), 3);
+    assert!(fresh_memory.contains_blackboard("infra:host"));
+}
+
+#[test]
+fn test_agent_metrics_tracker_and_snapshots() {
+    let metrics = AgentMetricsTracker::new();
+
+    metrics.record_task_submitted();
+    metrics.record_task_submitted();
+    metrics.record_task_completed(std::time::Duration::from_millis(50));
+    metrics.record_task_failed(std::time::Duration::from_millis(150));
+
+    let decision = RoutingDecision::new(
+        "t1",
+        "a1",
+        RoutingStrategy::PriorityTiered,
+        0.95,
+        "Highest priority",
+    );
+    metrics.record_routing_decision(&decision);
+
+    metrics.record_tool_call("kv_put", true, std::time::Duration::from_millis(10));
+    metrics.record_tool_call("kv_put", true, std::time::Duration::from_millis(15));
+    metrics.record_tool_call("calc", false, std::time::Duration::from_millis(5));
+
+    metrics.record_reflection_pass(2, ReflectionVerdict::Approved);
+    metrics.record_blackboard_write();
+    metrics.record_blackboard_read();
+
+    let snap = metrics.snapshot();
+    assert_eq!(snap.tasks_submitted, 2);
+    assert_eq!(snap.tasks_completed, 1);
+    assert_eq!(snap.tasks_failed, 1);
+    assert_eq!(snap.task_success_rate, 0.5);
+    assert_eq!(snap.task_execution_latency.count, 2);
+    assert_eq!(snap.task_execution_latency.min_ms, 50);
+    assert_eq!(snap.task_execution_latency.max_ms, 150);
+
+    assert_eq!(snap.preemptive_routings, 1);
+    assert_eq!(snap.total_tool_calls, 3);
+    assert_eq!(snap.successful_tool_calls, 2);
+    assert_eq!(snap.failed_tool_calls, 1);
+    assert_eq!(snap.tool_usage_by_name.get("kv_put"), Some(&2));
+
+    assert_eq!(snap.total_reflection_passes, 1);
+    assert_eq!(snap.approved_reflections, 1);
+    assert_eq!(snap.reflection_approval_rate, 1.0);
+
+    // Reset
+    metrics.reset();
+    let reset_snap = metrics.snapshot();
+    assert_eq!(reset_snap.tasks_submitted, 0);
+    assert_eq!(reset_snap.total_tool_calls, 0);
+}
+
+#[test]
+fn test_agent_events_and_broadcasting() {
+    let broadcaster = EventBroadcaster::new();
+
+    let collector = Arc::new(CollectingEventHandler::new(50));
+    let metrics = Arc::new(AgentMetricsTracker::new());
+    let metrics_handler = Arc::new(MetricsEventHandler::new(metrics.clone()));
+    let callback_received = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cb_flag = callback_received.clone();
+    let cb_handler = Arc::new(CallbackEventHandler::new(move |_e| {
+        cb_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }));
+
+    broadcaster.add_handler(collector.clone());
+    broadcaster.add_handler(metrics_handler);
+    broadcaster.add_handler(cb_handler);
+
+    assert_eq!(broadcaster.handler_count(), 3);
+
+    let e1 = AgentEvent::WorkflowStarted {
+        workflow_id: "wf-1".into(),
+        task_count: 2,
+        timestamp: AgentEvent::current_timestamp(),
+    };
+    let e2 = AgentEvent::TaskSubmitted {
+        task_id: TaskId::new("t1"),
+        priority: TaskPriority::Critical,
+        timestamp: AgentEvent::current_timestamp(),
+    };
+    let e3 = AgentEvent::ToolCallCompleted {
+        task_id: TaskId::new("t1"),
+        agent_id: AgentId::new("bot"),
+        tool_name: "echo".into(),
+        success: true,
+        duration_ms: 5,
+        timestamp: AgentEvent::current_timestamp(),
+    };
+
+    broadcaster.broadcast(&e1);
+    broadcaster.broadcast(&e2);
+    broadcaster.broadcast(&e3);
+
+    assert_eq!(broadcaster.dispatched_count(), 3);
+    assert_eq!(collector.count(), 3);
+    assert!(callback_received.load(std::sync::atomic::Ordering::Relaxed));
+
+    // Verify metrics handler recorded tool and task
+    let snap = metrics.snapshot();
+    assert_eq!(snap.tasks_submitted, 1);
+    assert_eq!(snap.total_tool_calls, 1);
+    assert_eq!(snap.successful_tool_calls, 1);
+}
+
+#[test]
+fn test_agent_pipeline_end_to_end_orchestration_and_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    let mut pipeline = AgentPipeline::new("pipeline-wf-1")
+        .with_store(store.clone());
+
+    // Register 2 agents: Planner and Coder
+    let planner = AgentDefinition::builder("p1", AgentRole::Planner)
+        .name("PlannerBot")
+        .capability(AgentCapability::TextGeneration)
+        .build();
+    let coder = AgentDefinition::builder("c1", AgentRole::Coder)
+        .name("CoderBot")
+        .capability(AgentCapability::CodeExecution)
+        .capability(AgentCapability::ToolCalling)
+        .build();
+
+    pipeline.register_agent(planner).unwrap();
+    pipeline.register_agent(coder).unwrap();
+
+    // Submit DAG tasks: task1 -> task2
+    let t1 = AgentTask::builder("task-spec", "Draft architectural specification")
+        .require_capability(AgentCapability::TextGeneration)
+        .build();
+    let t2 = AgentTask::builder("task-impl", "Implement feature module")
+        .require_capability(AgentCapability::CodeExecution)
+        .build();
+
+    pipeline.submit_task(t1, &[]).unwrap();
+    pipeline.submit_task(t2, &[TaskId::new("task-spec")]).unwrap();
+
+    // Execute full pipeline
+    let summary = pipeline.run().unwrap();
+    assert_eq!(summary.status, WorkflowStatus::Succeeded);
+    assert_eq!(summary.total_tasks, 2);
+    assert_eq!(summary.completed_tasks, 2);
+    assert_eq!(summary.failed_tasks, 0);
+
+    // Verify episodic memory automatically recorded the executions
+    assert_eq!(pipeline.memory().episode_count(), 2);
+
+    // Verify metrics recorded completion
+    let metrics_snap = pipeline.metrics_snapshot();
+    assert_eq!(metrics_snap.tasks_completed, 2);
+    assert_eq!(metrics_snap.task_success_rate, 1.0);
+
+    // Verify FlashStore received the checkpoint and can restore
+    let restored_pipeline = AgentPipeline::restore_from_store(store, "pipeline-wf-1").unwrap();
+    assert_eq!(restored_pipeline.engine().state().tasks.len(), 2);
+    assert_eq!(restored_pipeline.engine().state().active_agents.len(), 2);
+
+    // Test single task fast-path
+    let quick_task = AgentTask::builder("quick-1", "Ad-hoc task")
+        .require_capability(AgentCapability::TextGeneration)
+        .build();
+    let report = pipeline.run_single_task(quick_task).unwrap();
+    assert_eq!(report.status, TaskStatus::Completed);
+    assert_eq!(report.assigned_agent, AgentId::new("p1"));
+}

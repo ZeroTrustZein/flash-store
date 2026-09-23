@@ -1089,6 +1089,8 @@ impl AgentStorageKey {
     pub const PREFIX_TASK: &'static str = "agent:task:";
     pub const PREFIX_REFLECTION: &'static str = "agent:refl:";
     pub const PREFIX_MESSAGE: &'static str = "agent:msg:";
+    pub const PREFIX_WORKFLOW: &'static str = "agent:wf:";
+    pub const PREFIX_MEMORY: &'static str = "agent:mem:";
 
     #[inline]
     pub fn agent_key(agent_id: &AgentId) -> String {
@@ -1108,6 +1110,16 @@ impl AgentStorageKey {
     #[inline]
     pub fn message_key(workflow_id: &str, msg_id: &str) -> String {
         format!("{}{}:{}", Self::PREFIX_MESSAGE, workflow_id, msg_id)
+    }
+
+    #[inline]
+    pub fn workflow_key(workflow_id: &str) -> String {
+        format!("{}{}", Self::PREFIX_WORKFLOW, workflow_id)
+    }
+
+    #[inline]
+    pub fn memory_key(namespace: &str, key: &str) -> String {
+        format!("{}{}:{}", Self::PREFIX_MEMORY, namespace, key)
     }
 }
 
