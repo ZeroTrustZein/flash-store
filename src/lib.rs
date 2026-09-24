@@ -12,6 +12,7 @@
 //! - **Compaction Engine**: Multi-level tiered compaction that purges overwritten versions and tombstones.
 //! - **Manifest & Versioning**: ACID version edits tracking SSTable level assignments across crash recoveries.
 //! - **RAG & Reranker Subsystem**: Native hybrid BM25/vector retrieval, cross-encoder reranking, semantic caching, and LLM context assembly.
+//! - **Multi-Agent Workflow Subsystem**: Autonomous task graph orchestration, adaptive routing, stateful reflection loops, dynamic tool calling, episodic memory, and telemetry.
 //!
 //! ## Quick Start
 //!
@@ -69,7 +70,39 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ## Autonomous Multi-Agent Swarm Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! # let dir = tempfile::tempdir().unwrap();
+//! let store_opts = OptionsBuilder::new().dir(dir.path()).build();
+//! let db = Arc::new(FlashStore::open(store_opts)?);
+//!
+//! let mut pipeline = AgentPipeline::new("swarm-quickstart").with_store(db);
+//!
+//! let agent = AgentDefinition::builder("worker-01", AgentRole::Coder)
+//!     .capability(AgentCapability::TextGeneration)
+//!     .capability(AgentCapability::StorageOps)
+//!     .build();
+//! pipeline.register_agent(agent)?;
+//!
+//! let task = AgentTask::builder("task-1", "Initialize Swarm Config")
+//!     .priority(TaskPriority::High)
+//!     .require_capability(AgentCapability::TextGeneration)
+//!     .build();
+//! pipeline.submit_task(task, &[])?;
+//!
+//! let summary = pipeline.run()?;
+//! assert_eq!(summary.completed_tasks, 1);
+//! # Ok(())
+//! # }
+//! ```
 
+pub mod agent;
 pub mod batch;
 pub mod cache;
 pub mod cli;
@@ -85,9 +118,29 @@ pub mod sstable;
 pub mod types;
 pub mod wal;
 
+pub use agent::{
+    compute_aggregate_score, create_standard_tool_registry, format_revision_prompt,
+    score_capability_match, score_priority_tier, score_role_affinity, score_workload,
+    verify_critical_invariants, AdaptiveRoutingWeights, AdaptiveTaskRouter, AgentCapability,
+    AgentDefinition, AgentDefinitionBuilder, AgentEngine, AgentEvent, AgentEventHandler, AgentId,
+    AgentMemoryStore, AgentMessage, AgentMetricsSnapshot, AgentMetricsTracker, AgentPipeline,
+    AgentPipelineConfig, AgentRole, AgentStorageKey, AgentStoreAdapter, AgentTask,
+    AgentTaskBuilder, CalculatorTool, CallbackEventHandler, CollectingEventHandler,
+    CompositeReflector, ConvergenceConfig, ConvergenceEvaluator, DefaultTaskRouter,
+    DurationTracker, EchoTool, EpisodicMemoryEntry, EvaluationCriterion, EventBroadcaster,
+    HeuristicReflector, KvDeleteTool, KvGetTool, KvPutTool, KvScanTool, LatencySummary,
+    LoadBalancingRouter, MemoryScoringWeights, MessageRole, MetricsEventHandler,
+    PriorityPreemptiveRouter, ReflectionCritique, ReflectionEngine, ReflectionState,
+    ReflectionStep, ReflectionVerdict, Reflector, RoutingDecision, RoutingStrategy,
+    RuleBasedReflector, ScoredMemory, TaskExecutionReport, TaskGraph, TaskId, TaskPriority,
+    TaskRouter, TaskStatus, Tool, ToolCall, ToolDefinition, ToolDispatcher, ToolOutput,
+    ToolParamType, ToolParameter, ToolRegistry, WorkflowState, WorkflowStatus, WorkflowSummary,
+};
 pub use batch::WriteBatch;
 pub use cache::{BlockCache, LruBlockCache};
-pub use cli::{open_rag_pipeline, Cmd, GlobalOpts, OutputFormat, RagCmd};
+pub use cli::{
+    open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+};
 pub use compaction::{CompactionTask, Compactor};
 pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
@@ -118,9 +171,29 @@ pub use types::{
 };
 
 pub mod prelude {
+    pub use crate::agent::{
+        compute_aggregate_score, create_standard_tool_registry, format_revision_prompt,
+        score_capability_match, score_priority_tier, score_role_affinity, score_workload,
+        verify_critical_invariants, AdaptiveRoutingWeights, AdaptiveTaskRouter, AgentCapability,
+        AgentDefinition, AgentDefinitionBuilder, AgentEngine, AgentEvent, AgentEventHandler,
+        AgentId, AgentMemoryStore, AgentMessage, AgentMetricsSnapshot, AgentMetricsTracker,
+        AgentPipeline, AgentPipelineConfig, AgentRole, AgentStorageKey, AgentStoreAdapter,
+        AgentTask, AgentTaskBuilder, CalculatorTool, CallbackEventHandler, CollectingEventHandler,
+        CompositeReflector, ConvergenceConfig, ConvergenceEvaluator, DefaultTaskRouter,
+        DurationTracker, EchoTool, EpisodicMemoryEntry, EvaluationCriterion, EventBroadcaster,
+        HeuristicReflector, KvDeleteTool, KvGetTool, KvPutTool, KvScanTool, LatencySummary,
+        LoadBalancingRouter, MemoryScoringWeights, MessageRole, MetricsEventHandler,
+        PriorityPreemptiveRouter, ReflectionCritique, ReflectionEngine, ReflectionState,
+        ReflectionStep, ReflectionVerdict, Reflector, RoutingDecision, RoutingStrategy,
+        RuleBasedReflector, ScoredMemory, TaskExecutionReport, TaskGraph, TaskId, TaskPriority,
+        TaskRouter, TaskStatus, Tool, ToolCall, ToolDefinition, ToolDispatcher, ToolOutput,
+        ToolParamType, ToolParameter, ToolRegistry, WorkflowState, WorkflowStatus, WorkflowSummary,
+    };
     pub use crate::batch::WriteBatch;
     pub use crate::cache::{BlockCache, LruBlockCache};
-    pub use crate::cli::{open_rag_pipeline, Cmd, GlobalOpts, OutputFormat, RagCmd};
+    pub use crate::cli::{
+        open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+    };
     pub use crate::compaction::{CompactionTask, Compactor};
     pub use crate::config::{Options, OptionsBuilder};
     pub use crate::engine::{FlashStore, Stats};

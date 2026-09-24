@@ -9,6 +9,33 @@
 ## 2. High-Level Architecture Overview
 
 ```
++========================================================================+
+|             LAYER 3: AUTONOMOUS MULTI-AGENT SWARM SUBSYSTEM            |
+|                                                                        |
+|    DAG Task Graphs   ──>  Adaptive Router      ──>  Reflection Engine  |
+|    Dynamic Tools     ──>  Episodic Blackboard  ──>  Pub/Sub Telemetry  |
++========================================================================+
+                                   |
+                                   v
++========================================================================+
+|             LAYER 2: HYBRID RAG & CROSS-ENCODER SUBSYSTEM              |
+|                                                                        |
+|    BM25 Sparse Index ──>  Dense Vector Index   ──>  Hybrid Score Fusion|
+|    Cross-Encoder     ──>  MMR Diversity        ──>  Semantic Cache     |
++========================================================================+
+                                   |
+                                   v
++========================================================================+
+|             LAYER 1: CORE FLASHSTORE LSM-TREE ENGINE                   |
+|                                                                        |
+|    WAL (CRC32 IEEE)  ──>  Concurrent MemTables ──>  SSTables (L0..LN)  |
+|    LRU Block Cache   ──>  Leveled Compaction   ──>  Manifest / Version |
++========================================================================+
+```
+
+### Core Storage Hierarchy (Layer 1 Detail)
+
+```
                       +---------------------------------------+
                       |          FlashStore Public API        |
                       |   (put, get, delete, write_batch)     |
@@ -122,12 +149,14 @@ To avoid deadlocks and maximize throughput under heavy concurrent workloads, Fla
 ```
 +-------------------------------------------------------------+
 | Lock Ordering Hierarchy:                                    |
-|   1. flush_lock / compact_lock   (Coarse lifecycle locks)   |
-|   2. memtable write lock         (Active table swap)        |
-|   3. imm_memtables write lock    (Immutable queue update)   |
-|   4. wal lock                    (Mutex<WalWriter>)         |
-|   5. version_set lock / manifest (Manifest updates)         |
-|   6. block_cache lock            (LRU node mutations)       |
+|   1. workflow_lock / task_lock   (Coarse agent scheduling)  |
+|   2. flush_lock / compact_lock   (Coarse lifecycle locks)   |
+|   3. memory_store lock           (Blackboard / episodic rw) |
+|   4. memtable write lock         (Active table swap)        |
+|   5. imm_memtables write lock    (Immutable queue update)   |
+|   6. wal lock                    (Mutex<WalWriter>)         |
+|   7. version_set lock / manifest (Manifest updates)         |
+|   8. block_cache lock            (LRU node mutations)       |
 +-------------------------------------------------------------+
 ```
 
@@ -195,4 +224,77 @@ Every document ingestion is batched into a single atomic `WriteBatch`, ensuring 
 2. **Persistent Mode (`RagEngine::with_store(config, store)` / `recover(...)`)**: Backed by a FlashStore instance, providing instant startup hydration by replaying persisted document keys and vectors from SSTables.
 
 For detailed algorithms, vector similarity metrics, BM25 formulas, and reranking heuristics, see the comprehensive [RAG & Reranker Architecture Guide](RAG_RERANKER.md).
+
+---
+
+## 7. Autonomous Multi-Agent Swarm Subsystem (Layer 3)
+
+Layer 3 provides an autonomous multi-agent task execution and workflow engine operating natively on top of the RAG and LSM-Tree storage layers.
+
+```
++========================================================================+
+|             LAYER 3: MULTI-AGENT SWARM WORKFLOW ENGINE                 |
+|                                                                        |
+|  +--------------------+  +--------------------+  +------------------+  |
+|  | Task Graph & DAG   |  | Adaptive Router    |  | Reflection Loop  |  |
+|  | Dependency Engine  |  | (Cap/Role/Load/Pri)|  | (Critique/Invars)|  |
+|  +---------+----------+  +---------+----------+  +--------+---------+  |
+|            |                       |                      |            |
+|            +-----------------------+----------------------+            |
+|                                    |                                   |
+|                      +-------------v--------------+                    |
+|                      |  Agent Pipeline Coordinator|                    |
+|                      +-------------+--------------+                    |
+|                                    |                                   |
+|            +-----------------------+----------------------+            |
+|            |                       |                      |            |
+|  +---------v----------+  +---------v----------+  +--------v---------+  |
+|  | Dynamic Tool Reg   |  | Blackboard & Memory|  | Event & Telemetry|  |
+|  | (OpenAI / MCP / KV)|  | (Episodic Recall)  |  | (p50/p90/p99)    |  |
+|  +--------------------+  +--------------------+  +------------------+  |
++====================================|===================================+
+                                     |
+                                     v Persisted via WriteBatch
++========================================================================+
+|                    CORE FLASHSTORE LSM-TREE (LAYER 1)                  |
++========================================================================+
+```
+
+### 7.1 Swarm Orchestration & Execution Graph
+- **DAG Execution**: Manages tasks with complex multi-stage dependency trees, validating for acyclicity and dispatching ready tasks as upstream dependencies complete.
+- **State Machine**: Transitions tasks deterministically through `Pending` $\to$ `Assigned` $\to$ `InProgress` $\to$ `InReflection` $\to$ `Completed`.
+
+### 7.2 Adaptive Task Routing
+- **Multi-Factor Scoring**: Routes tasks based on required capabilities ($w_c$), role affinity ($w_a$), agent queue depth / workload ($w_w$), and task priority preemption ($w_p$).
+- **Pluggable Routers**: Includes `AdaptiveTaskRouter`, `LoadBalancingRouter`, and `PriorityPreemptiveRouter`.
+
+### 7.3 Stateful Reflection & Convergence Loops
+- **Iterative Self-Correction**: Drives agent solution refinement using structured critiques across accuracy, completeness, structure, and domain invariants.
+- **Convergence Guardrails**: Halts on quality threshold convergence, plateau detection ($\Delta S < \text{min\_delta}$), or max iteration limits.
+
+### 7.4 Dynamic Tools & MCP Integration
+- **Schema Validation**: Parameters conform to JSON Schema with automatic export to OpenAI Tool Calling and Anthropic Model Context Protocol (MCP) tool format.
+- **Embedded Storage Tools**: Provides native tools (`kv_put`, `kv_get`, `kv_delete`, `kv_scan`) granting autonomous agents direct, safe access to the FlashStore LSM-tree engine.
+
+### 7.5 Dual-Tier Memory & Associative Recall
+- **Shared Working Memory (Blackboard)**: Fast concurrent scratchpad for intra-swarm data sharing.
+- **Episodic Memory**: Recorded task outcomes and reflections indexed with decaying recency, assigned importance, and query-relevance lexical similarity.
+
+### 7.6 Atomic Storage Adapter & Checkpoint Recovery
+- All swarm states (agent registrations, tasks, messages, checkpoints, and episodic memories) are mapped to deterministic binary key prefixes (`agent:def:`, `agent:task:`, `agent:msg:`, `agent:wf:`, `agent:mem:`).
+- Checkpoints commit atomically via `WriteBatch`, enabling full crash recovery via `AgentPipeline::restore_from_store`.
+
+For deep technical specifications, mathematical scoring formulations, and tool calling schemas, see the [Multi-Agent Swarm Architecture Guide](AGENT_WORKFLOW.md).
+
+---
+
+## 8. Subsystem Technical Guides
+
+- 🤖 **[Multi-Agent Swarm Architecture Guide](AGENT_WORKFLOW.md)**: Task graphs, adaptive routing, reflection loops, tools, and episodic memory.
+- 🧠 **[RAG & Reranker Architecture Guide](RAG_RERANKER.md)**: Hybrid BM25/vector search, Reciprocal Rank Fusion, cross-encoders, and semantic caching.
+- 💾 **[SSTable Binary Format Specification](SSTABLE_FORMAT.md)**: Data blocks, Bloom filters, index blocks, and 48-byte footers.
+- 📜 **[Write-Ahead Log (WAL) & Recovery Protocol](WAL_RECOVERY.md)**: CRC32 framing, durability modes, and replay algorithms.
+- 🔄 **[Leveled Compaction Architecture](COMPACTION.md)**: Multi-way merge iterators, tombstone purging, and dynamic level scoring.
+- ⚡ **[Performance, Benchmarking & Tuning](BENCHMARKS.md)**: RUM trade-offs and Criterion benchmark suites.
+
 
