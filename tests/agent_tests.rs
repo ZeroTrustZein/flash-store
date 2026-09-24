@@ -686,8 +686,12 @@ fn test_agent_engine_complete_pipeline_with_tools_and_reflection() {
         .build();
 
     engine.submit_task(t1, &[]).unwrap();
-    engine.submit_task(t2, &[TaskId::new("step1-plan")]).unwrap();
-    engine.submit_task(t3, &[TaskId::new("step2-store")]).unwrap();
+    engine
+        .submit_task(t2, &[TaskId::new("step1-plan")])
+        .unwrap();
+    engine
+        .submit_task(t3, &[TaskId::new("step2-store")])
+        .unwrap();
 
     let summary = engine.run_workflow().unwrap();
     assert_eq!(summary.status, WorkflowStatus::Succeeded);
@@ -723,7 +727,10 @@ fn test_agent_store_adapter_persistence_and_hydration() {
         .build();
     adapter.persist_agent(&agent).unwrap();
 
-    let loaded_agent = adapter.load_agent(&agent.id).unwrap().expect("Agent must exist");
+    let loaded_agent = adapter
+        .load_agent(&agent.id)
+        .unwrap()
+        .expect("Agent must exist");
     assert_eq!(loaded_agent.name, "Architect");
     assert_eq!(loaded_agent.role, AgentRole::Planner);
 
@@ -740,12 +747,19 @@ fn test_agent_store_adapter_persistence_and_hydration() {
         .priority(TaskPriority::Medium)
         .build();
 
-    adapter.persist_tasks_batch(&[task1.clone(), task2.clone()]).unwrap();
+    adapter
+        .persist_tasks_batch(&[task1.clone(), task2.clone()])
+        .unwrap();
 
-    let loaded_t1 = adapter.load_task(&task1.id).unwrap().expect("Task 101 must exist");
+    let loaded_t1 = adapter
+        .load_task(&task1.id)
+        .unwrap()
+        .expect("Task 101 must exist");
     assert_eq!(loaded_t1.status, TaskStatus::InProgress);
 
-    let running_tasks = adapter.list_tasks_by_status(TaskStatus::InProgress).unwrap();
+    let running_tasks = adapter
+        .list_tasks_by_status(TaskStatus::InProgress)
+        .unwrap();
     assert_eq!(running_tasks.len(), 1);
     assert_eq!(running_tasks[0].id, task1.id);
 
@@ -773,7 +787,10 @@ fn test_agent_store_adapter_persistence_and_hydration() {
     wf_state.post_message(msg1.clone());
 
     adapter.checkpoint_full_workflow(&wf_state).unwrap();
-    let loaded_wf = adapter.load_workflow_state("wf-demo").unwrap().expect("Workflow must exist");
+    let loaded_wf = adapter
+        .load_workflow_state("wf-demo")
+        .unwrap()
+        .expect("Workflow must exist");
     assert_eq!(loaded_wf.workflow_id, "wf-demo");
     assert_eq!(loaded_wf.tasks.len(), 1);
     assert_eq!(loaded_wf.active_agents.len(), 1);
@@ -802,12 +819,24 @@ fn test_agent_memory_store_blackboard_and_episodic_recall() {
 
     // 2. Episodic memory recording and retrieval
     let agent_id = AgentId::new("researcher");
-    let ep1 = EpisodicMemoryEntry::new(agent_id.clone(), "Compiled RocksDB engine with SSE4 SIMD support", 0.9)
-        .with_tags(vec!["database".into(), "compilation".into()]);
-    let ep2 = EpisodicMemoryEntry::new(agent_id.clone(), "Investigated LSM tree write amplification benchmarks", 0.8)
-        .with_tags(vec!["database".into(), "benchmarks".into()]);
-    let ep3 = EpisodicMemoryEntry::new(AgentId::new("tester"), "Flaky network timeout test resolved", 0.5)
-        .with_tags(vec!["testing".into()]);
+    let ep1 = EpisodicMemoryEntry::new(
+        agent_id.clone(),
+        "Compiled RocksDB engine with SSE4 SIMD support",
+        0.9,
+    )
+    .with_tags(vec!["database".into(), "compilation".into()]);
+    let ep2 = EpisodicMemoryEntry::new(
+        agent_id.clone(),
+        "Investigated LSM tree write amplification benchmarks",
+        0.8,
+    )
+    .with_tags(vec!["database".into(), "benchmarks".into()]);
+    let ep3 = EpisodicMemoryEntry::new(
+        AgentId::new("tester"),
+        "Flaky network timeout test resolved",
+        0.5,
+    )
+    .with_tags(vec!["testing".into()]);
 
     memory.record_episode(ep1).unwrap();
     memory.record_episode(ep2).unwrap();
@@ -953,8 +982,7 @@ fn test_agent_pipeline_end_to_end_orchestration_and_recovery() {
     let opts = OptionsBuilder::new().dir(dir.path()).build();
     let store = Arc::new(FlashStore::open(opts).unwrap());
 
-    let mut pipeline = AgentPipeline::new("pipeline-wf-1")
-        .with_store(store.clone());
+    let mut pipeline = AgentPipeline::new("pipeline-wf-1").with_store(store.clone());
 
     // Register 2 agents: Planner and Coder
     let planner = AgentDefinition::builder("p1", AgentRole::Planner)
@@ -979,7 +1007,9 @@ fn test_agent_pipeline_end_to_end_orchestration_and_recovery() {
         .build();
 
     pipeline.submit_task(t1, &[]).unwrap();
-    pipeline.submit_task(t2, &[TaskId::new("task-spec")]).unwrap();
+    pipeline
+        .submit_task(t2, &[TaskId::new("task-spec")])
+        .unwrap();
 
     // Execute full pipeline
     let summary = pipeline.run().unwrap();
@@ -1008,4 +1038,372 @@ fn test_agent_pipeline_end_to_end_orchestration_and_recovery() {
     let report = pipeline.run_single_task(quick_task).unwrap();
     assert_eq!(report.status, TaskStatus::Completed);
     assert_eq!(report.assigned_agent, AgentId::new("p1"));
+}
+
+#[test]
+fn test_concurrent_multi_agent_pipeline_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    let mut handles = Vec::new();
+    let num_threads = 4;
+
+    for thread_id in 0..num_threads {
+        let store_clone = store.clone();
+        let handle = std::thread::spawn(move || {
+            let wf_id = format!("concurrent_wf_{}", thread_id);
+            let mut pipeline = AgentPipeline::new(&wf_id).with_store(store_clone);
+
+            let agent = AgentDefinition::builder(format!("worker_{}", thread_id), AgentRole::Coder)
+                .capability(AgentCapability::CodeExecution)
+                .build();
+            pipeline.register_agent(agent).unwrap();
+
+            for task_idx in 0..5 {
+                let task = AgentTask::builder(
+                    format!("t_{}_{}", thread_id, task_idx),
+                    format!("Concurrent computation {}", task_idx),
+                )
+                .require_capability(AgentCapability::CodeExecution)
+                .build();
+
+                let report = pipeline.run_single_task(task).unwrap();
+                assert_eq!(report.status, TaskStatus::Completed);
+            }
+
+            pipeline.checkpoint().unwrap();
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let adapter = AgentStoreAdapter::new(store);
+    let workflows = adapter.list_workflows().unwrap();
+    assert_eq!(workflows.len(), num_threads);
+}
+
+#[test]
+fn test_agent_engine_task_failure_and_partial_recovery() {
+    let router = Arc::new(PriorityPreemptiveRouter::new().with_threshold(0.8));
+    let mut engine = AgentEngine::new("failure_wf").with_router(router);
+
+    let agent = AgentDefinition::builder("worker_basic", AgentRole::Coder)
+        .capability(AgentCapability::TextGeneration)
+        .build();
+    engine.register_agent(agent);
+
+    // Task 1 requires TextGeneration - should succeed
+    let t1 = AgentTask::builder("t1_ok", "Generate documentation")
+        .require_capability(AgentCapability::TextGeneration)
+        .build();
+
+    // Task 2 is Critical and requires CodeExecution - no agent has it, should fail routing
+    let t2 = AgentTask::builder("t2_fail", "Execute code")
+        .priority(TaskPriority::Critical)
+        .require_capability(AgentCapability::CodeExecution)
+        .build();
+
+    engine.submit_task(t1, &[]).unwrap();
+    engine.submit_task(t2, &[TaskId::new("t1_ok")]).unwrap();
+
+    let res = engine.run_workflow();
+    assert!(res.is_err());
+    assert_eq!(engine.state().status, WorkflowStatus::Failed);
+
+    // Verify task 1 output is completed and preserved
+    let t1_res = engine.state().tasks.get(&TaskId::new("t1_ok")).unwrap();
+    assert_eq!(t1_res.status, TaskStatus::Completed);
+
+    let t2_res = engine.state().tasks.get(&TaskId::new("t2_fail")).unwrap();
+    assert_eq!(t2_res.status, TaskStatus::Failed);
+}
+
+#[test]
+fn test_complex_task_dag_topological_order_and_cycles() {
+    let mut graph = TaskGraph::new();
+    let ids: Vec<TaskId> = (1..=8)
+        .map(|i| TaskId::new(format!("task_{}", i)))
+        .collect();
+
+    graph.add_dependency(&ids[2], &ids[0]).unwrap(); // t3 -> t1
+    graph.add_dependency(&ids[3], &ids[0]).unwrap(); // t4 -> t1
+    graph.add_dependency(&ids[3], &ids[1]).unwrap(); // t4 -> t2
+    graph.add_dependency(&ids[4], &ids[1]).unwrap(); // t5 -> t2
+
+    graph.add_dependency(&ids[5], &ids[2]).unwrap(); // t6 -> t3
+    graph.add_dependency(&ids[5], &ids[3]).unwrap(); // t6 -> t4
+    graph.add_dependency(&ids[6], &ids[3]).unwrap(); // t7 -> t4
+    graph.add_dependency(&ids[6], &ids[4]).unwrap(); // t7 -> t5
+
+    graph.add_dependency(&ids[7], &ids[5]).unwrap(); // t8 -> t6
+    graph.add_dependency(&ids[7], &ids[6]).unwrap(); // t8 -> t7
+
+    let tiers = graph.topological_tiers().unwrap();
+    assert_eq!(tiers.len(), 4);
+    assert_eq!(tiers[0].len(), 2);
+    assert_eq!(tiers[1].len(), 3);
+    assert_eq!(tiers[2].len(), 2);
+    assert_eq!(tiers[3].len(), 1);
+    assert_eq!(tiers[3][0], ids[7]);
+
+    // Test cycle detection: t1 -> t8 creates a massive cycle
+    assert!(graph.add_dependency(&ids[0], &ids[7]).is_err());
+    // Test direct cycle: t3 -> t6 (already exists t6 -> t3)
+    assert!(graph.add_dependency(&ids[2], &ids[5]).is_err());
+    // Test self cycle: t4 -> t4
+    assert!(graph.add_dependency(&ids[3], &ids[3]).is_err());
+}
+
+#[test]
+fn test_tool_dispatcher_error_isolation_and_edge_cases() {
+    let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(CalculatorTool));
+    registry.register(Arc::new(EchoTool));
+
+    let dispatcher = ToolDispatcher::new(Arc::new(registry));
+
+    // 1. Unknown tool
+    let unknown_call = ToolCall::new("c1", "unknown_tool_xyz", serde_json::json!({}));
+    let out = dispatcher.dispatch(&unknown_call);
+    assert!(!out.is_success());
+    assert!(out
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Tool 'unknown_tool_xyz' not found"));
+
+    // 2. Calculator: division by zero
+    let div_zero_call = ToolCall::new(
+        "c2",
+        "calculator",
+        serde_json::json!({ "operation": "div", "a": 10.0, "b": 0.0 }),
+    );
+    let out = dispatcher.dispatch(&div_zero_call);
+    assert!(!out.is_success());
+    assert!(out.error.as_ref().unwrap().contains("Division by zero"));
+
+    // 3. Calculator: missing operand
+    let missing_operand = ToolCall::new(
+        "c3",
+        "calculator",
+        serde_json::json!({ "operation": "add", "a": 5.0 }),
+    );
+    let out = dispatcher.dispatch(&missing_operand);
+    assert!(!out.is_success());
+
+    // 4. Calculator: invalid operation string
+    let invalid_op = ToolCall::new(
+        "c4",
+        "calculator",
+        serde_json::json!({ "operation": "unsupported_op", "a": 5.0, "b": 3.0 }),
+    );
+    let out = dispatcher.dispatch(&invalid_op);
+    assert!(!out.is_success());
+
+    // 5. Valid echo tool continues to work after errors
+    let echo_call = ToolCall::new("c5", "echo", serde_json::json!({ "message": "all good" }));
+    let out = dispatcher.dispatch(&echo_call);
+    assert!(out.is_success());
+    assert_eq!(out.result["echoed"], "all good");
+}
+
+#[test]
+fn test_reflection_engine_max_iterations_exhaustion() {
+    let reflector = Arc::new(RuleBasedReflector::new(10, vec!["FAIL_ME".into()]));
+    let config = ConvergenceConfig {
+        max_iterations: 3,
+        passing_threshold: 0.85,
+        ..Default::default()
+    };
+    let engine = ReflectionEngine::new(reflector).with_config(config);
+
+    let task = AgentTask::builder("t_exhaust", "Strict validation").build();
+
+    let state = engine
+        .execute_loop(&task, "initial candidate with FAIL_ME", |_prompt, _prev| {
+            Ok("revision still containing FAIL_ME".to_string())
+        })
+        .unwrap();
+
+    assert_eq!(state.current_iteration, 3);
+    assert_eq!(state.steps.len(), 3);
+    assert!(!state.converged);
+}
+
+#[test]
+fn test_agent_memory_edge_cases_and_concurrency() {
+    let memory = Arc::new(AgentMemoryStore::new(50));
+
+    // Multi-threaded blackboard operations
+    let mut handles = Vec::new();
+    for thread_idx in 0..8 {
+        let mem = memory.clone();
+        handles.push(std::thread::spawn(move || {
+            for i in 0..20 {
+                let key = format!("thread_{}:counter_{}", thread_idx, i);
+                mem.set_blackboard(&key, serde_json::json!(i));
+                assert_eq!(mem.get_blackboard(&key), Some(serde_json::json!(i)));
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    assert_eq!(memory.snapshot_blackboard().len(), 8 * 20);
+
+    // Unicode and multilingual episodic memory recall
+    let agent = AgentId::new("polyglot_agent");
+    let ep_ja = EpisodicMemoryEntry::new(
+        agent.clone(),
+        "ログ構造化 マージツリー LSMツリー 性能最適化",
+        0.9,
+    )
+    .with_tags(vec!["日本語".into(), "データベース".into()]);
+
+    let ep_ar = EpisodicMemoryEntry::new(
+        agent.clone(),
+        "تحسين أداء شجرة الدمج المهيكلة في قاعدة البيانات",
+        0.85,
+    )
+    .with_tags(vec!["قاعدة_بيانات".into()]);
+
+    let ep_emoji = EpisodicMemoryEntry::new(
+        agent.clone(),
+        "⚡ FlashStore LSM-tree engine with CRC32 checksums 🛡️",
+        0.95,
+    )
+    .with_tags(vec!["fast".into(), "secure".into()]);
+
+    memory.record_episode(ep_ja).unwrap();
+    memory.record_episode(ep_ar).unwrap();
+    memory.record_episode(ep_emoji).unwrap();
+
+    let recalled_ja = memory.recall("LSMツリー", 1).unwrap();
+    assert!(!recalled_ja.is_empty());
+    assert!(recalled_ja[0].memory.content.contains("マージツリー"));
+
+    let recalled_ar = memory.recall("الدمج", 1).unwrap();
+    assert!(!recalled_ar.is_empty());
+    assert!(recalled_ar[0].memory.content.contains("شجرة"));
+
+    let recalled_emoji = memory.recall("FlashStore ⚡", 1).unwrap();
+    assert!(!recalled_emoji.is_empty());
+    assert!(recalled_emoji[0].memory.content.contains("CRC32"));
+}
+
+#[test]
+fn test_agent_store_crash_recovery_with_compaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().to_path_buf();
+
+    // Session 1: Create, execute, flush, and compact
+    {
+        let opts = OptionsBuilder::new().dir(&db_path).build();
+        let store = Arc::new(FlashStore::open(opts).unwrap());
+        let mut pipeline = AgentPipeline::new("resilient_wf").with_store(store.clone());
+
+        let planner = AgentDefinition::builder("p_resilient", AgentRole::Planner)
+            .capability(AgentCapability::TextGeneration)
+            .build();
+        let coder = AgentDefinition::builder("c_resilient", AgentRole::Coder)
+            .capability(AgentCapability::CodeExecution)
+            .build();
+
+        pipeline.register_agents(&[planner, coder]).unwrap();
+
+        let t1 = AgentTask::builder("task_p1", "Step 1: Write spec")
+            .require_capability(AgentCapability::TextGeneration)
+            .build();
+        let t2 = AgentTask::builder("task_c1", "Step 2: Implement code")
+            .require_capability(AgentCapability::CodeExecution)
+            .build();
+
+        pipeline.submit_task(t1, &[]).unwrap();
+        pipeline.submit_task(t2, &[TaskId::new("task_p1")]).unwrap();
+
+        let summary = pipeline.run().unwrap();
+        assert_eq!(summary.status, WorkflowStatus::Succeeded);
+
+        pipeline
+            .memory()
+            .set_blackboard("system:state", serde_json::json!("healthy"));
+        pipeline.checkpoint().unwrap();
+
+        // Flush and compact to SSTables
+        store.flush().unwrap();
+        store.compact().unwrap();
+    }
+
+    // Session 2: Crash recovery into brand-new FlashStore handle
+    {
+        let opts = OptionsBuilder::new().dir(&db_path).build();
+        let store = Arc::new(FlashStore::open(opts).unwrap());
+
+        let restored_pipeline =
+            AgentPipeline::restore_from_store(store.clone(), "resilient_wf").unwrap();
+        let state = restored_pipeline.engine().state();
+
+        assert_eq!(state.active_agents.len(), 2);
+        assert_eq!(state.tasks.len(), 2);
+        assert_eq!(restored_pipeline.memory().episode_count(), 2);
+        assert_eq!(
+            restored_pipeline.memory().get_blackboard("system:state"),
+            Some(serde_json::json!("healthy"))
+        );
+
+        // Continue workflow execution after crash recovery
+        let mut pipeline = restored_pipeline;
+        let t3 = AgentTask::builder("task_c2", "Step 3: Post-recovery validation")
+            .require_capability(AgentCapability::CodeExecution)
+            .build();
+        let report = pipeline.run_single_task(t3).unwrap();
+        assert_eq!(report.status, TaskStatus::Completed);
+    }
+}
+
+#[test]
+fn test_adaptive_router_load_balancing_under_stress() {
+    let router = LoadBalancingRouter::new(10);
+
+    let worker_a = AgentDefinition::builder("worker_a", AgentRole::Coder)
+        .capability(AgentCapability::CodeExecution)
+        .build();
+    let worker_b = AgentDefinition::builder("worker_b", AgentRole::Coder)
+        .capability(AgentCapability::CodeExecution)
+        .build();
+    let worker_c = AgentDefinition::builder("worker_c", AgentRole::Coder)
+        .capability(AgentCapability::CodeExecution)
+        .build();
+
+    let agents = vec![worker_a, worker_b, worker_c];
+
+    let mut assignments: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for i in 0..30 {
+        let task = AgentTask::builder(format!("task_{}", i), "Compute unit")
+            .require_capability(AgentCapability::CodeExecution)
+            .build();
+
+        let decision = router.route(&task, &agents).unwrap();
+        router.track_task_started(&decision.target_agent);
+        *assignments
+            .entry(decision.target_agent.to_string())
+            .or_insert(0) += 1;
+
+        if i % 2 == 0 {
+            router.track_task_completed(&decision.target_agent);
+        }
+    }
+
+    assert_eq!(assignments.len(), 3);
+    for count in assignments.values() {
+        assert!(*count >= 5);
+    }
 }

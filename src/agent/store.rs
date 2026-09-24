@@ -9,8 +9,8 @@ use bytes::Bytes;
 use serde_json;
 
 use crate::agent::types::{
-    AgentDefinition, AgentId, AgentMessage, AgentStorageKey, AgentTask, ReflectionCritique,
-    TaskId, TaskStatus, WorkflowState,
+    AgentDefinition, AgentId, AgentMessage, AgentStorageKey, AgentTask, ReflectionCritique, TaskId,
+    TaskStatus, WorkflowState,
 };
 use crate::batch::WriteBatch;
 use crate::engine::FlashStore;
@@ -200,10 +200,7 @@ impl AgentStoreAdapter {
     }
 
     /// Loads a reflection critique for a task.
-    pub fn load_reflection_critique(
-        &self,
-        task_id: &TaskId,
-    ) -> Result<Option<ReflectionCritique>> {
+    pub fn load_reflection_critique(&self, task_id: &TaskId) -> Result<Option<ReflectionCritique>> {
         let key = AgentStorageKey::reflection_key(task_id);
         match self.store.get(key.as_bytes())? {
             Some(bytes) => {
@@ -329,8 +326,9 @@ impl AgentStoreAdapter {
         // 3. All messages in workflow
         for msg in &state.message_history {
             let msg_key = AgentStorageKey::message_key(&state.workflow_id, &msg.message_id);
-            let msg_val = serde_json::to_vec(msg)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize message: {}", e)))?;
+            let msg_val = serde_json::to_vec(msg).map_err(|e| {
+                FlashStoreError::Agent(format!("Failed to serialize message: {}", e))
+            })?;
             batch.put(msg_key.into_bytes(), msg_val);
         }
 

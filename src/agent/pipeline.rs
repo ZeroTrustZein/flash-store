@@ -168,14 +168,13 @@ impl AgentPipeline {
             Ok(s) => s,
             Err(e) => {
                 let dur = start.elapsed().as_millis() as u64;
-                self.broadcaster
-                    .broadcast(&AgentEvent::WorkflowCompleted {
-                        workflow_id: self.engine.state().workflow_id.clone(),
-                        completed_tasks: 0,
-                        failed_tasks: total_tasks,
-                        duration_ms: dur,
-                        timestamp: AgentEvent::current_timestamp(),
-                    });
+                self.broadcaster.broadcast(&AgentEvent::WorkflowCompleted {
+                    workflow_id: self.engine.state().workflow_id.clone(),
+                    completed_tasks: 0,
+                    failed_tasks: total_tasks,
+                    duration_ms: dur,
+                    timestamp: AgentEvent::current_timestamp(),
+                });
                 return Err(e);
             }
         };
@@ -203,7 +202,10 @@ impl AgentPipeline {
                         0.8,
                     )
                     .with_task_id(report.task_id.clone())
-                    .with_tags(vec!["task_output".into(), report.assigned_agent.to_string()]);
+                    .with_tags(vec![
+                        "task_output".into(),
+                        report.assigned_agent.to_string(),
+                    ]);
 
                     let _ = self.memory.record_episode(entry);
                 }
@@ -292,11 +294,9 @@ impl AgentPipeline {
     /// Restores a pipeline from an existing checkpoint in FlashStore.
     pub fn restore_from_store(store: Arc<FlashStore>, workflow_id: &str) -> Result<Self> {
         let adapter = AgentStoreAdapter::new(store.clone());
-        let wf_state = adapter
-            .load_workflow_state(workflow_id)?
-            .ok_or_else(|| {
-                FlashStoreError::Agent(format!("Workflow checkpoint '{}' not found", workflow_id))
-            })?;
+        let wf_state = adapter.load_workflow_state(workflow_id)?.ok_or_else(|| {
+            FlashStoreError::Agent(format!("Workflow checkpoint '{}' not found", workflow_id))
+        })?;
 
         let mut pipeline = AgentPipeline::new(workflow_id)
             .with_store(store)

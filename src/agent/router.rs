@@ -56,19 +56,29 @@ pub fn score_role_affinity(task: &AgentTask, agent: &AgentDefinition) -> f32 {
     // Role bonus based on task title/description keywords
     let text = format!("{} {}", task.title, task.description).to_lowercase();
     match &agent.role {
-        AgentRole::Coder if text.contains("code") || text.contains("implement") || text.contains("refactor") => {
+        AgentRole::Coder
+            if text.contains("code") || text.contains("implement") || text.contains("refactor") =>
+        {
             affinity += 0.2;
         }
-        AgentRole::Critic if text.contains("critique") || text.contains("review") || text.contains("inspect") => {
+        AgentRole::Critic
+            if text.contains("critique") || text.contains("review") || text.contains("inspect") =>
+        {
             affinity += 0.2;
         }
-        AgentRole::Verifier if text.contains("test") || text.contains("verify") || text.contains("bench") => {
+        AgentRole::Verifier
+            if text.contains("test") || text.contains("verify") || text.contains("bench") =>
+        {
             affinity += 0.2;
         }
-        AgentRole::Planner if text.contains("plan") || text.contains("decompose") || text.contains("design") => {
+        AgentRole::Planner
+            if text.contains("plan") || text.contains("decompose") || text.contains("design") =>
+        {
             affinity += 0.2;
         }
-        AgentRole::MemoryAgent if text.contains("store") || text.contains("memory") || text.contains("rag") => {
+        AgentRole::MemoryAgent
+            if text.contains("store") || text.contains("memory") || text.contains("rag") =>
+        {
             affinity += 0.2;
         }
         _ => {}
@@ -126,7 +136,11 @@ impl LoadBalancingRouter {
     pub fn new(max_concurrency: usize) -> Self {
         Self {
             active_loads: Arc::new(RwLock::new(HashMap::new())),
-            max_concurrency_per_agent: if max_concurrency == 0 { 4 } else { max_concurrency },
+            max_concurrency_per_agent: if max_concurrency == 0 {
+                4
+            } else {
+                max_concurrency
+            },
         }
     }
 
@@ -294,7 +308,10 @@ impl TaskRouter for PriorityPreemptiveRouter {
         let (best_agent, top_cap, top_role) = candidates[0];
 
         // Verify critical tasks meet capability standards
-        if task.priority == TaskPriority::Critical && top_cap < self.critical_threshold && !task.required_capabilities.is_empty() {
+        if task.priority == TaskPriority::Critical
+            && top_cap < self.critical_threshold
+            && !task.required_capabilities.is_empty()
+        {
             return Err(FlashStoreError::Agent(format!(
                 "Critical task '{}' cannot be safely routed: top candidate {} only satisfies {:.0}% of capabilities (required {:.0}%)",
                 task.id,
@@ -380,11 +397,7 @@ impl AdaptiveTaskRouter {
     }
 
     /// Computes full multi-factor score for an agent.
-    pub fn evaluate_agent(
-        &self,
-        task: &AgentTask,
-        agent: &AgentDefinition,
-    ) -> (f32, String) {
+    pub fn evaluate_agent(&self, task: &AgentTask, agent: &AgentDefinition) -> (f32, String) {
         let cap_score = score_capability_match(task, agent);
         let role_score = score_role_affinity(task, agent);
         let current_load = self.load_balancer.get_load(&agent.id);
@@ -439,7 +452,10 @@ impl TaskRouter for AdaptiveTaskRouter {
             best_agent.id.clone(),
             RoutingStrategy::Adaptive,
             *best_score,
-            format!("Adaptive choice {} (fitness: {:.2}): {}", best_agent.id, best_score, rationale),
+            format!(
+                "Adaptive choice {} (fitness: {:.2}): {}",
+                best_agent.id, best_score, rationale
+            ),
         );
 
         for (fallback, _, _) in scored.iter().skip(1).take(2) {

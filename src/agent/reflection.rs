@@ -67,9 +67,8 @@ pub fn verify_critical_invariants(
 ) -> (bool, Option<String>) {
     for c in critiques {
         // If criterion is safety, security, or correctness, treat as critical
-        let is_critical_name = c.dimension == "safety"
-            || c.dimension == "security"
-            || c.dimension == "correctness";
+        let is_critical_name =
+            c.dimension == "safety" || c.dimension == "security" || c.dimension == "correctness";
 
         if is_critical_name && c.score < critical_threshold {
             return (
@@ -199,7 +198,9 @@ impl ConvergenceEvaluator {
                 let delta1 = (current_score - prev_score).abs();
                 let delta2 = (prev_score - prev_prev_score).abs();
 
-                if delta1 < self.config.stagnation_epsilon && delta2 < self.config.stagnation_epsilon {
+                if delta1 < self.config.stagnation_epsilon
+                    && delta2 < self.config.stagnation_epsilon
+                {
                     if current_score >= self.config.passing_threshold - 0.05 {
                         // Close enough, converge
                         return (
@@ -251,7 +252,11 @@ pub fn format_revision_prompt(
     prompt.push_str("#### Identified Issues & Critiques:\n");
 
     for critique in &step.critiques {
-        let status = if critique.score >= 0.7 { "PASS" } else { "FAIL" };
+        let status = if critique.score >= 0.7 {
+            "PASS"
+        } else {
+            "FAIL"
+        };
         prompt.push_str(&format!(
             "- `[{}]` **{}** (score: {:.2}): {}\n",
             status, critique.dimension, critique.score, critique.feedback
@@ -314,12 +319,7 @@ impl ReflectionEngine {
             self.evaluator
                 .evaluate(iteration, overall_score, &critiques, &state.steps);
 
-        let step = ReflectionStep::new(
-            iteration,
-            candidate_output,
-            critiques,
-            verdict,
-        );
+        let step = ReflectionStep::new(iteration, candidate_output, critiques, verdict);
 
         if let Some(exp) = explanation {
             tracing::debug!(iteration = iteration, verdict = ?verdict, score = overall_score, "{exp}");
@@ -470,7 +470,10 @@ impl Reflector for HeuristicReflector {
                 ReflectionCritique::new(
                     "safety",
                     0.2,
-                    format!("Contains prohibited placeholder tokens: {:?}", found_prohibited),
+                    format!(
+                        "Contains prohibited placeholder tokens: {:?}",
+                        found_prohibited
+                    ),
                 )
                 .with_improvement("Remove all placeholders and provide production-ready code"),
             );
@@ -602,7 +605,11 @@ mod tests {
         let critiques = vec![
             ReflectionCritique::new("completeness", 1.0, "Great length"),
             ReflectionCritique::new("conciseness", 1.0, "Concise"),
-            ReflectionCritique::new("safety", 0.3, "Critical SQL injection vulnerability detected"),
+            ReflectionCritique::new(
+                "safety",
+                0.3,
+                "Critical SQL injection vulnerability detected",
+            ),
         ];
 
         let score = compute_aggregate_score(&critiques);
@@ -639,7 +646,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(final_state.steps.len(), 2);
-        assert_eq!(final_state.steps[0].verdict, ReflectionVerdict::NeedsRevision);
+        assert_eq!(
+            final_state.steps[0].verdict,
+            ReflectionVerdict::NeedsRevision
+        );
         assert_eq!(final_state.steps[1].verdict, ReflectionVerdict::Approved);
         assert_eq!(
             final_state.best_candidate().unwrap(),

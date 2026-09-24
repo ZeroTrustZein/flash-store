@@ -301,11 +301,7 @@ impl AgentMetricsTracker {
     // Reflection Event Recorders
     // ========================================================================
 
-    pub fn record_reflection_pass(
-        &self,
-        iterations: usize,
-        verdict: ReflectionVerdict,
-    ) {
+    pub fn record_reflection_pass(&self, iterations: usize, verdict: ReflectionVerdict) {
         self.total_reflection_passes.fetch_add(1, Ordering::Relaxed);
         self.total_reflection_iterations
             .fetch_add(iterations as u64, Ordering::Relaxed);

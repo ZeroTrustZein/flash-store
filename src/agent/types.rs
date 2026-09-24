@@ -75,6 +75,13 @@ impl From<&str> for AgentId {
     }
 }
 
+impl std::borrow::Borrow<str> for AgentId {
+    #[inline]
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Specialized architectural roles assigned to swarm agents.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -268,8 +275,20 @@ impl TaskId {
         Self(id.into())
     }
 
+    /// Generates a unique timestamped TaskId.
+    pub fn generate() -> Self {
+        Self(format!("task_{}", current_timestamp_micros()))
+    }
+
     #[inline]
     pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for TaskId {
+    #[inline]
+    fn borrow(&self) -> &str {
         &self.0
     }
 }
@@ -423,6 +442,19 @@ impl AgentTask {
         self.status = TaskStatus::Failed;
         self.error_message = Some(reason.into());
         self.updated_at = current_timestamp();
+    }
+
+    /// Computes capability match fraction against an agent's capability set (0.0 to 1.0).
+    pub fn capability_match_score(&self, agent: &AgentDefinition) -> f32 {
+        if self.required_capabilities.is_empty() {
+            return 1.0;
+        }
+        let matched = self
+            .required_capabilities
+            .iter()
+            .filter(|cap| agent.has_capability(**cap))
+            .count();
+        matched as f32 / self.required_capabilities.len() as f32
     }
 }
 
@@ -1167,15 +1199,7 @@ impl TaskRouter for DefaultTaskRouter {
         if !task.required_capabilities.is_empty() {
             let mut candidates: Vec<(&AgentDefinition, f32)> = available_agents
                 .iter()
-                .map(|agent| {
-                    let matched = task
-                        .required_capabilities
-                        .iter()
-                        .filter(|c| agent.has_capability(**c))
-                        .count();
-                    let score = matched as f32 / task.required_capabilities.len() as f32;
-                    (agent, score)
-                })
+                .map(|agent| (agent, task.capability_match_score(agent)))
                 .collect();
 
             candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1251,51 +1275,44 @@ impl ToolRegistry {
     }
 
     pub fn execute(&self, call: &ToolCall) -> Result<ToolOutput> {
-        let start = SystemTime::now();
+        let start = std::time::Instant::now();
         let tool = match self.get(&call.tool_name) {
             Some(t) => t,
             None => {
-                let duration = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
                 return Ok(ToolOutput::error(
                     call.call_id.clone(),
                     call.tool_name.clone(),
                     format!("Tool '{}' not found in registry", call.tool_name),
-                    duration,
+                    start.elapsed().as_millis() as u64,
                 ));
             }
         };
 
         // Validate arguments
         if let Err(e) = tool.definition().validate_arguments(&call.arguments) {
-            let duration = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
             return Ok(ToolOutput::error(
                 call.call_id.clone(),
                 call.tool_name.clone(),
                 e.to_string(),
-                duration,
+                start.elapsed().as_millis() as u64,
             ));
         }
 
-        match tool.execute(&call.arguments) {
-            Ok(result) => {
-                let duration = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
-                Ok(ToolOutput::success(
-                    call.call_id.clone(),
-                    call.tool_name.clone(),
-                    result,
-                    duration,
-                ))
-            }
-            Err(e) => {
-                let duration = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
-                Ok(ToolOutput::error(
-                    call.call_id.clone(),
-                    call.tool_name.clone(),
-                    e.to_string(),
-                    duration,
-                ))
-            }
-        }
+        let output = match tool.execute(&call.arguments) {
+            Ok(result) => ToolOutput::success(
+                call.call_id.clone(),
+                call.tool_name.clone(),
+                result,
+                start.elapsed().as_millis() as u64,
+            ),
+            Err(e) => ToolOutput::error(
+                call.call_id.clone(),
+                call.tool_name.clone(),
+                e.to_string(),
+                start.elapsed().as_millis() as u64,
+            ),
+        };
+        Ok(output)
     }
 }
 
@@ -1361,12 +1378,12 @@ impl Reflector for RuleBasedReflector {
         }
 
         // Check prohibited keywords
-        let mut found_prohibited = Vec::new();
-        for pattern in &self.prohibited_substrings {
-            if candidate_output.contains(pattern) {
-                found_prohibited.push(pattern.clone());
-            }
-        }
+        let found_prohibited: Vec<&str> = self
+            .prohibited_substrings
+            .iter()
+            .filter(|pattern| candidate_output.contains(pattern.as_str()))
+            .map(|s| s.as_str())
+            .collect();
 
         if !found_prohibited.is_empty() {
             critiques.push(
@@ -1394,10 +1411,18 @@ impl Reflector for RuleBasedReflector {
 // ============================================================================
 
 #[inline]
-fn current_timestamp() -> u64 {
+pub fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+#[inline]
+pub fn current_timestamp_micros() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros())
         .unwrap_or(0)
 }
 

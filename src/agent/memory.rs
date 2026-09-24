@@ -310,7 +310,11 @@ impl AgentMemoryStore {
         }
 
         // Sort descending by score
-        scored_list.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored_list.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored_list.truncate(top_k);
 
         Ok(scored_list)
@@ -318,10 +322,8 @@ impl AgentMemoryStore {
 
     /// Fast lexical Jaccard/overlap fallback between query and memory content.
     fn lexical_overlap(query: &str, content: &str) -> f32 {
-        let q_words: std::collections::HashSet<String> = query
-            .split_whitespace()
-            .map(|w| w.to_lowercase())
-            .collect();
+        let q_words: std::collections::HashSet<String> =
+            query.split_whitespace().map(|w| w.to_lowercase()).collect();
         let c_words: std::collections::HashSet<String> = content
             .split_whitespace()
             .map(|w| w.to_lowercase())
@@ -344,8 +346,9 @@ impl AgentMemoryStore {
     pub fn persist_to_store(&self, store: &AgentStoreAdapter, namespace: &str) -> Result<()> {
         let blackboard_snap = self.snapshot_blackboard();
         let bb_key = AgentStorageKey::memory_key(namespace, "blackboard");
-        let bb_val = serde_json::to_vec(&blackboard_snap)
-            .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize blackboard: {}", e)))?;
+        let bb_val = serde_json::to_vec(&blackboard_snap).map_err(|e| {
+            FlashStoreError::Agent(format!("Failed to serialize blackboard: {}", e))
+        })?;
         store.store().put(bb_key.into_bytes(), bb_val)?;
 
         let episodes = self.episodes.read().clone();
@@ -363,16 +366,19 @@ impl AgentMemoryStore {
         let mut loaded = false;
 
         if let Some(bytes) = store.store().get(bb_key.as_bytes())? {
-            let map: HashMap<String, serde_json::Value> = serde_json::from_slice(&bytes)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to deserialize blackboard: {}", e)))?;
+            let map: HashMap<String, serde_json::Value> =
+                serde_json::from_slice(&bytes).map_err(|e| {
+                    FlashStoreError::Agent(format!("Failed to deserialize blackboard: {}", e))
+                })?;
             *self.blackboard.write() = map;
             loaded = true;
         }
 
         let ep_key = AgentStorageKey::memory_key(namespace, "episodes");
         if let Some(bytes) = store.store().get(ep_key.as_bytes())? {
-            let eps: Vec<EpisodicMemoryEntry> = serde_json::from_slice(&bytes)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to deserialize episodes: {}", e)))?;
+            let eps: Vec<EpisodicMemoryEntry> = serde_json::from_slice(&bytes).map_err(|e| {
+                FlashStoreError::Agent(format!("Failed to deserialize episodes: {}", e))
+            })?;
             *self.episodes.write() = eps;
             loaded = true;
         }

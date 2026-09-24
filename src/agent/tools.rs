@@ -81,7 +81,9 @@ impl Tool for KvGetTool {
         let key = arguments
             .get("key")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlashStoreError::InvalidArgument("Missing required 'key' argument".into()))?;
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
+            })?;
 
         match self.store.get(key)? {
             Some(bytes) => {
@@ -115,19 +117,22 @@ impl KvPutTool {
 
 impl Tool for KvPutTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("kv_put", "Inserts or updates a key-value pair in FlashStore")
-            .with_parameter(ToolParameter::new(
-                "key",
-                ToolParamType::String,
-                "The storage key to write",
-                true,
-            ))
-            .with_parameter(ToolParameter::new(
-                "value",
-                ToolParamType::String,
-                "The string value to associate with key",
-                true,
-            ))
+        ToolDefinition::new(
+            "kv_put",
+            "Inserts or updates a key-value pair in FlashStore",
+        )
+        .with_parameter(ToolParameter::new(
+            "key",
+            ToolParamType::String,
+            "The storage key to write",
+            true,
+        ))
+        .with_parameter(ToolParameter::new(
+            "value",
+            ToolParamType::String,
+            "The string value to associate with key",
+            true,
+        ))
     }
 
     fn execute(&self, arguments: &serde_json::Value) -> Result<serde_json::Value> {
@@ -164,13 +169,16 @@ impl KvDeleteTool {
 
 impl Tool for KvDeleteTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("kv_delete", "Deletes a key from FlashStore by writing a tombstone")
-            .with_parameter(ToolParameter::new(
-                "key",
-                ToolParamType::String,
-                "The key to delete",
-                true,
-            ))
+        ToolDefinition::new(
+            "kv_delete",
+            "Deletes a key from FlashStore by writing a tombstone",
+        )
+        .with_parameter(ToolParameter::new(
+            "key",
+            ToolParamType::String,
+            "The key to delete",
+            true,
+        ))
     }
 
     fn execute(&self, arguments: &serde_json::Value) -> Result<serde_json::Value> {
@@ -220,7 +228,9 @@ impl Tool for KvScanTool {
         let start_key = arguments
             .get("start_key")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlashStoreError::InvalidArgument("Missing 'start_key' argument".into()))?;
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing 'start_key' argument".into())
+            })?;
 
         let limit = arguments
             .get("limit")
@@ -256,42 +266,45 @@ pub struct CalculatorTool;
 
 impl Tool for CalculatorTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("calculator", "Performs mathematical arithmetic calculations")
-            .with_parameter(ToolParameter::new(
-                "operation",
-                ToolParamType::String,
-                "One of: add, sub, mul, div, pow, mod",
-                true,
-            ))
-            .with_parameter(ToolParameter::new(
-                "a",
-                ToolParamType::Float,
-                "First operand",
-                true,
-            ))
-            .with_parameter(ToolParameter::new(
-                "b",
-                ToolParamType::Float,
-                "Second operand",
-                true,
-            ))
+        ToolDefinition::new(
+            "calculator",
+            "Performs mathematical arithmetic calculations",
+        )
+        .with_parameter(ToolParameter::new(
+            "operation",
+            ToolParamType::String,
+            "One of: add, sub, mul, div, pow, mod",
+            true,
+        ))
+        .with_parameter(ToolParameter::new(
+            "a",
+            ToolParamType::Float,
+            "First operand",
+            true,
+        ))
+        .with_parameter(ToolParameter::new(
+            "b",
+            ToolParamType::Float,
+            "Second operand",
+            true,
+        ))
     }
 
     fn execute(&self, arguments: &serde_json::Value) -> Result<serde_json::Value> {
         let op = arguments
             .get("operation")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlashStoreError::InvalidArgument("Missing 'operation' argument".into()))?;
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing 'operation' argument".into())
+            })?;
 
-        let a = arguments
-            .get("a")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| FlashStoreError::InvalidArgument("Missing numeric operand 'a'".into()))?;
+        let a = arguments.get("a").and_then(|v| v.as_f64()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing numeric operand 'a'".into())
+        })?;
 
-        let b = arguments
-            .get("b")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| FlashStoreError::InvalidArgument("Missing numeric operand 'b'".into()))?;
+        let b = arguments.get("b").and_then(|v| v.as_f64()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing numeric operand 'b'".into())
+        })?;
 
         let result = match op.to_lowercase().as_str() {
             "add" | "+" => a + b,
@@ -327,13 +340,16 @@ pub struct EchoTool;
 
 impl Tool for EchoTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("echo", "Echoes input back; used for diagnostics and testing")
-            .with_parameter(ToolParameter::new(
-                "message",
-                ToolParamType::String,
-                "Text message to echo back",
-                true,
-            ))
+        ToolDefinition::new(
+            "echo",
+            "Echoes input back; used for diagnostics and testing",
+        )
+        .with_parameter(ToolParameter::new(
+            "message",
+            ToolParamType::String,
+            "Text message to echo back",
+            true,
+        ))
     }
 
     fn execute(&self, arguments: &serde_json::Value) -> Result<serde_json::Value> {
@@ -452,7 +468,11 @@ mod tests {
         let dispatcher = ToolDispatcher::new(registry);
 
         let calls = vec![
-            ToolCall::new("call-1", "calculator", json!({ "operation": "mul", "a": 6.0, "b": 7.0 })),
+            ToolCall::new(
+                "call-1",
+                "calculator",
+                json!({ "operation": "mul", "a": 6.0, "b": 7.0 }),
+            ),
             ToolCall::new("call-2", "echo", json!({ "message": "ping" })),
             ToolCall::new("call-3", "unknown_tool", json!({})),
         ];

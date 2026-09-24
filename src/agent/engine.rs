@@ -6,7 +6,7 @@
 //! - Autonomous agent step execution coordinating routing, tool execution, and reflection loops.
 //! - End-to-end multi-agent workflow lifecycle orchestration (`WorkflowStatus` state machine).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -94,47 +94,12 @@ impl TaskGraph {
 
     /// Detects cycles using Kahn's topological sort algorithm.
     pub fn detect_cycles(&self) -> Result<()> {
-        let mut in_degrees: HashMap<TaskId, usize> = HashMap::new();
-        for (task, deps) in &self.dependencies {
-            in_degrees.insert(task.clone(), deps.len());
-        }
-
-        let mut queue = VecDeque::new();
-        for (task, &deg) in &in_degrees {
-            if deg == 0 {
-                queue.push_back(task.clone());
-            }
-        }
-
-        let mut visited_count = 0;
-        while let Some(task) = queue.pop_front() {
-            visited_count += 1;
-            if let Some(deps) = self.dependents.get(&task) {
-                for dependent in deps {
-                    if let Some(deg) = in_degrees.get_mut(dependent) {
-                        *deg -= 1;
-                        if *deg == 0 {
-                            queue.push_back(dependent.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        if visited_count != self.dependencies.len() {
-            Err(FlashStoreError::Agent(
-                "Cycle detected in task dependency graph".into(),
-            ))
-        } else {
-            Ok(())
-        }
+        self.topological_tiers().map(|_| ())
     }
 
     /// Computes parallel execution tiers where tasks within each tier can execute concurrently.
     pub fn topological_tiers(&self) -> Result<Vec<Vec<TaskId>>> {
-        self.detect_cycles()?;
-
-        let mut in_degrees: HashMap<TaskId, usize> = HashMap::new();
+        let mut in_degrees: HashMap<TaskId, usize> = HashMap::with_capacity(self.dependencies.len());
         for (task, deps) in &self.dependencies {
             in_degrees.insert(task.clone(), deps.len());
         }
@@ -174,7 +139,7 @@ impl TaskGraph {
 
         if remaining > 0 {
             return Err(FlashStoreError::Agent(
-                "Failed to partition tasks into topological tiers due to unresolved cycle".into(),
+                "Cycle detected in task dependency graph".into(),
             ));
         }
 
@@ -234,7 +199,10 @@ impl AgentEngine {
     pub fn new(workflow_id: impl Into<String>) -> Self {
         let registry = Arc::new(create_standard_tool_registry(None));
         let reflector = Arc::new(HeuristicReflector::default());
-        let router = Arc::new(AdaptiveTaskRouter::new(AdaptiveRoutingWeights::default(), 4));
+        let router = Arc::new(AdaptiveTaskRouter::new(
+            AdaptiveRoutingWeights::default(),
+            4,
+        ));
 
         Self {
             state: WorkflowState::new(workflow_id),
@@ -312,15 +280,18 @@ impl AgentEngine {
             .ok_or_else(|| FlashStoreError::Agent(format!("Task '{}' not found", task_id)))?;
 
         // 2. Verify dependencies
-        let completed: HashSet<TaskId> = self
-            .state
-            .tasks
-            .values()
-            .filter(|t| t.status == TaskStatus::Completed)
-            .map(|t| t.id.clone())
-            .collect();
+        let deps_ready = match self.graph.get_dependencies(task_id) {
+            Some(deps) => deps.iter().all(|dep| {
+                self.state
+                    .tasks
+                    .get(dep)
+                    .map(|t| t.status == TaskStatus::Completed)
+                    .unwrap_or(false)
+            }),
+            None => true,
+        };
 
-        if !self.graph.is_ready(task_id, &completed) {
+        if !deps_ready {
             return Err(FlashStoreError::Agent(format!(
                 "Task '{}' dependencies are not yet satisfied",
                 task_id
@@ -364,10 +335,18 @@ impl AgentEngine {
 
         // If task or agent requires tools, execute required tool operations
         if agent.has_capability(AgentCapability::ToolCalling) {
-            if let Some(tool_name) = task.input_context.get("required_tool").and_then(|t| t.as_str()) {
-                let args = task.input_context.get("tool_args").cloned().unwrap_or(json!({}));
+            if let Some(tool_name) = task
+                .input_context
+                .get("required_tool")
+                .and_then(|t| t.as_str())
+            {
+                let args = task
+                    .input_context
+                    .get("tool_args")
+                    .cloned()
+                    .unwrap_or(json!({}));
                 let call = ToolCall::new(format!("call-{}-1", task.id), tool_name, args);
-                
+
                 let output = self.tools.execute(&call)?;
                 tool_outputs.push(output);
                 tool_calls_executed += 1;
@@ -386,20 +365,20 @@ impl AgentEngine {
         let mut final_text = initial_output;
 
         if agent.has_capability(AgentCapability::Reflection)
-            || task.required_capabilities.contains(&AgentCapability::Reflection)
+            || task
+                .required_capabilities
+                .contains(&AgentCapability::Reflection)
         {
             task.reflect();
-            let refl_engine = ReflectionEngine::new(self.reflector.clone())
-                .with_config(ConvergenceConfig {
+            let refl_engine =
+                ReflectionEngine::new(self.reflector.clone()).with_config(ConvergenceConfig {
                     max_iterations: agent.max_iterations.min(5),
                     ..ConvergenceConfig::default()
                 });
 
-            let refl_state = refl_engine.execute_loop(
-                &task,
-                &final_text,
-                |_prompt, prev| Ok(format!("{}\nVerified and refined by {}.", prev, agent.id)),
-            )?;
+            let refl_state = refl_engine.execute_loop(&task, &final_text, |_prompt, prev| {
+                Ok(format!("{}\nVerified and refined by {}.", prev, agent.id))
+            })?;
 
             reflection_iterations = refl_state.steps.len();
             reflection_verdict = refl_state.latest_step().map(|s| s.verdict);
@@ -422,10 +401,8 @@ impl AgentEngine {
         task.complete(output_artifacts.clone());
 
         // Update shared memory
-        self.state.set_shared_memory(
-            format!("task:{}:output", task.id),
-            output_artifacts.clone(),
-        );
+        self.state
+            .set_shared_memory(format!("task:{}:output", task.id), output_artifacts.clone());
 
         // Record assistant response message
         self.state.post_message(AgentMessage::new(
@@ -599,7 +576,9 @@ mod tests {
             .build();
 
         engine.submit_task(task1, &[]).unwrap();
-        engine.submit_task(task2, &[TaskId::new("task-plan")]).unwrap();
+        engine
+            .submit_task(task2, &[TaskId::new("task-plan")])
+            .unwrap();
 
         let summary = engine.run_workflow().unwrap();
         assert_eq!(summary.status, WorkflowStatus::Succeeded);
