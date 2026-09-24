@@ -12,6 +12,7 @@
 //! - **Compaction Engine**: Multi-level tiered compaction that purges overwritten versions and tombstones.
 //! - **Manifest & Versioning**: ACID version edits tracking SSTable level assignments across crash recoveries.
 //! - **RAG & Reranker Subsystem**: Native hybrid BM25/vector retrieval, cross-encoder reranking, semantic caching, and LLM context assembly.
+//! - **Multi-Agent Workflow Subsystem**: Autonomous task graph orchestration, adaptive routing, stateful reflection loops, dynamic tool calling, episodic memory, and telemetry.
 //!
 //! ## Quick Start
 //!
@@ -66,6 +67,37 @@
 //! let result = pipeline.query("FlashStore in Rust", 1)?;
 //! assert_eq!(result.documents.len(), 1);
 //! assert_eq!(result.documents[0].id.as_str(), "doc1");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Autonomous Multi-Agent Swarm Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! # let dir = tempfile::tempdir().unwrap();
+//! let store_opts = OptionsBuilder::new().dir(dir.path()).build();
+//! let db = Arc::new(FlashStore::open(store_opts)?);
+//!
+//! let mut pipeline = AgentPipeline::new("swarm-quickstart").with_store(db);
+//!
+//! let agent = AgentDefinition::builder("worker-01", AgentRole::Coder)
+//!     .capability(AgentCapability::TextGeneration)
+//!     .capability(AgentCapability::StorageOps)
+//!     .build();
+//! pipeline.register_agent(agent)?;
+//!
+//! let task = AgentTask::builder("task-1", "Initialize Swarm Config")
+//!     .priority(TaskPriority::High)
+//!     .require_capability(AgentCapability::TextGeneration)
+//!     .build();
+//! pipeline.submit_task(task, &[])?;
+//!
+//! let summary = pipeline.run()?;
+//! assert_eq!(summary.completed_tasks, 1);
 //! # Ok(())
 //! # }
 //! ```

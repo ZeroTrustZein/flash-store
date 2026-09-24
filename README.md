@@ -4,7 +4,7 @@
 [![CI Status](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rustc-1.75%2B-brightgreen.svg)](https://blog.rust-lang.org/)
 
-**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust, featuring a native **RAG (Retrieval-Augmented Generation), Cross-Encoder Reranking, and Semantic Caching Subsystem**. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, fast range scans, and intelligent vector-lexical retrieval, FlashStore provides a modular architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, atomic `WriteBatch` persistence, hybrid BM25/vector search, and cross-encoder reranking.
+**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust, featuring a native **RAG (Retrieval-Augmented Generation), Cross-Encoder Reranking, and Semantic Caching Subsystem**, and an **Autonomous Multi-Agent Swarm Workflow Engine**. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, fast range scans, intelligent vector-lexical retrieval, and multi-agent task execution, FlashStore provides a modular 3-tier architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, atomic `WriteBatch` persistence, hybrid BM25/vector search, cross-encoder reranking, adaptive task routing, stateful reflection loops, and episodic memory.
 
 ---
 
@@ -12,11 +12,12 @@
 
 - [Key Highlights](#-key-highlights)
 - [Architecture & Design](#-architecture--design)
-  - [High-Level Layered Architecture](#high-level-layered-architecture)
-  - [Write Path (Insert / Update / Delete / Batch)](#write-path-insert--update--delete--batch)
-  - [Read Path (Point Lookup)](#read-path-point-lookup)
+  - [3-Tier Layered Architecture](#3-tier-layered-architecture)
+  - [Storage Engine Write Path (Insert / Update / Delete / Batch)](#storage-engine-write-path-insert--update--delete--batch)
+  - [Storage Engine Read Path (Point Lookup)](#storage-engine-read-path-point-lookup)
   - [SSTable File Layout](#sstable-file-layout)
   - [RAG & Reranker Subsystem Architecture](#rag--reranker-subsystem-architecture)
+  - [Autonomous Multi-Agent Swarm Architecture](#autonomous-multi-agent-swarm-architecture)
 - [Feature Matrix](#-feature-matrix)
 - [Installation & Setup](#-installation--setup)
 - [Rust API Reference](#-rust-api-reference)
@@ -29,6 +30,7 @@
   - [Manual & Automated Flush / Compaction](#manual--automated-flush--compaction)
   - [Clean Shutdown & Crash Recovery](#clean-shutdown--crash-recovery)
   - [RAG Retrieval & Reranker Pipeline API](#rag-retrieval--reranker-pipeline-api)
+  - [Autonomous Multi-Agent Swarm Workflow API](#autonomous-multi-agent-swarm-workflow-api)
 - [Command Line Interface (`flash-cli`)](#-command-line-interface-flash-cli)
   - [CLI Overview & Global Flags](#cli-overview--global-flags)
   - [One-Shot Subcommands](#one-shot-subcommands)
@@ -36,6 +38,7 @@
   - [Batch Script File Formats](#batch-script-file-formats)
   - [SSTable Deep Inspection](#sstable-deep-inspection)
   - [RAG & Vector Search Subcommands (`flash-cli rag`)](#rag--vector-search-subcommands-flash-cli-rag)
+  - [Autonomous Multi-Agent Swarm Commands (`flash-cli agent`)](#autonomous-multi-agent-swarm-commands-flash-cli-agent)
 - [Engine Internals Deep Dive](#-engine-internals-deep-dive)
   - [1. Write-Ahead Log (WAL)](#1-write-ahead-log-wal)
   - [2. MemTable & SkipList](#2-memtable--skiplist)
@@ -45,6 +48,7 @@
   - [6. Manifest & VersionSet Architecture](#6-manifest--versionset-architecture)
   - [7. Concurrency & Multi-Version Ordering](#7-concurrency--multi-version-ordering)
   - [8. Hybrid RAG Retrieval, Reranking & Caching](#8-hybrid-rag-retrieval-reranking--caching)
+  - [9. Autonomous Swarm Task Graphs, Adaptive Routing & Reflection](#9-autonomous-swarm-task-graphs-adaptive-routing--reflection)
 - [Configuration Reference](#-configuration-reference)
 - [Code Examples](#-code-examples)
   - [Basic CRUD Lifecycle](#basic-crud-lifecycle)
@@ -53,6 +57,7 @@
   - [Crash Recovery & Durability](#crash-recovery--durability)
   - [Multi-Threaded Worker Pool](#multi-threaded-worker-pool)
   - [End-to-End RAG Pipeline & Semantic Caching](#end-to-end-rag-pipeline--semantic-caching)
+  - [Autonomous Multi-Agent Swarm Workflow](#autonomous-multi-agent-swarm-workflow)
 - [Deep Technical Documentation](#-deep-technical-documentation)
 - [Benchmarks & Performance](#-benchmarks--performance)
 - [Testing & Quality Assurance](#-testing--quality-assurance)
@@ -72,51 +77,45 @@
 - **Native RAG & Cross-Encoder Reranking**: Built-in hybrid retrieval combining dense vector similarity with BM25 sparse search, fused via Reciprocal Rank Fusion (RRF), and scored with cross-encoder lexical-semantic alignment.
 - **Semantic Vector Query Cache**: Instant sub-millisecond query responses for semantically equivalent queries using cosine similarity thresholds, TTL expiration, and LRU eviction.
 - **Context Assembly & LLM Citations**: Token-budget-aware context packing with configurable truncation (`TruncateLast`, `DropOversized`), structured layouts (Markdown, XML, Numbered, Compact), and 1-based citation references (`[1]`, `[2]`).
-- **Rich CLI & Interactive REPL**: Built-in CLI tool (`flash-cli`) supporting KV operations, RAG pipelines, text/JSON/TSV formats, batch files, and SSTable binary dissection.
+- **Autonomous Multi-Agent Swarm Orchestrator**: Directed Acyclic Graph (DAG) task execution with topological dependency scheduling, cycle detection, and state machine transitions.
+- **Adaptive Task Routing & Load Balancing**: Multi-criteria routing engine scoring candidate agents across capabilities, role affinity, active workload, and priority preemption.
+- **Stateful Reflection Loops & Convergence**: Iterative self-critique engine evaluating candidate outputs against accuracy, completeness, and domain invariants with automated plateau detection.
+- **Dynamic Tool Registry & MCP Schemas**: Safe tool execution supporting OpenAI function definitions, Model Context Protocol (MCP) tool format, and direct FlashStore LSM-tree storage tools (`kv_put`, `kv_get`, `kv_delete`, `kv_scan`).
+- **Dual-Tier Memory (Blackboard & Episodic)**: Shared in-memory working scratchpad combined with persistent episodic memory supporting associative semantic recall scoring.
+- **Rich CLI & Interactive REPL**: Built-in CLI tool (`flash-cli`) supporting KV operations, RAG pipelines, multi-agent workflows, text/JSON/TSV formats, batch files, and SSTable binary dissection.
 
 ---
 
 ## 🏗 Architecture & Design
 
-### High-Level Swarm Architecture
+### 3-Tier Layered Architecture
 
 ```
-                    +--------------------------------------------------------+
-                    |                      Client Code / CLI                 |
-                    +---------------------------+----------------------------+
-                                                |
-                        +-----------------------v------------------------+
-                        |                 FlashStore (API)               |
-                        +-----------+------------------------+-----------+
-                                    |                        |
-                       (Write Path) |                        | (Read Path)
-                                    v                        v
-                    +---------------+----+       +-----------+--------------------+
-                    |  Write-Ahead Log   |       |        Active MemTable         |
-                    |   (current.wal)    |       +-----------+--------------------+
-                    +---------------+----+                   |
-                                    |                        v
-                                    |            +-----------+--------------------+
-                                    +----------->|   Immutable MemTables (Freeze) |
-                                                 +-----------+--------------------+
-                                                             |
-                                               [Flush]       v
-                                    +---------------------------------------------+
-                                    |        Level 0 SSTables (000001.sst)        |
-                                    +----------------------+----------------------+
-                                                           |
-                                            [Compaction]   v
-                                    +---------------------------------------------+
-                                    |        Level 1 SSTables (Non-overlapping)   |
-                                    +----------------------+----------------------+
-                                                           |
-                                            [Compaction]   v
-                                    +---------------------------------------------+
-                                    |        Level N SSTables (Capacity x 10^N)   |
-                                    +---------------------------------------------+
++========================================================================+
+|             LAYER 3: AUTONOMOUS MULTI-AGENT SWARM SUBSYSTEM            |
+|                                                                        |
+|    DAG Task Graphs   ──>  Adaptive Router      ──>  Reflection Engine  |
+|    Dynamic Tools     ──>  Episodic Blackboard  ──>  Pub/Sub Telemetry  |
++========================================================================+
+                                   |
+                                   v
++========================================================================+
+|             LAYER 2: HYBRID RAG & CROSS-ENCODER SUBSYSTEM              |
+|                                                                        |
+|    BM25 Sparse Index ──>  Dense Vector Index   ──>  Hybrid Score Fusion|
+|    Cross-Encoder     ──>  MMR Diversity        ──>  Semantic Cache     |
++========================================================================+
+                                   |
+                                   v
++========================================================================+
+|             LAYER 1: CORE FLASHSTORE LSM-TREE ENGINE                   |
+|                                                                        |
+|    WAL (CRC32 IEEE)  ──>  Concurrent MemTables ──>  SSTables (L0..LN)  |
+|    LRU Block Cache   ──>  Leveled Compaction   ──>  Manifest / Version |
++========================================================================+
 ```
 
-### Write Path (Insert / Update / Delete / Batch)
+### Storage Engine Write Path (Insert / Update / Delete / Batch)
 
 1. **Sequence Allocation**: Monotonically increments atomic sequence counter (`AtomicU64`).
 2. **WAL Journaling**: Encodes a `WalRecord` (`[CRC32: 4B][Length: 4B][Payload]`) and writes to `current.wal`. If `sync_wal = true`, invokes OS `fsync`.
@@ -127,7 +126,7 @@
 Client Put/Delete ──> Next Sequence ──> Append to WAL (CRC32) ──> Insert to MemTable ──> Flush Check
 ```
 
-### Read Path (Point Lookup)
+### Storage Engine Read Path (Point Lookup)
 
 FlashStore evaluates storage tiers in strictly chronological order to ensure the latest sequence update is returned first:
 
@@ -212,7 +211,55 @@ FlashStore includes a native high-performance RAG and reranker layer on top of t
                      └─────────────────┬─────────────────┘
                                        │
                                        ▼
-                     [ LLM Prompt / Pipeline Result ] ◄──────────────┘
+                      [ LLM Prompt / Pipeline Result ] ◄──────────────┘
+```
+
+### Autonomous Multi-Agent Swarm Architecture
+
+FlashStore features an autonomous multi-agent orchestration layer directly on top of the RAG and storage engines:
+
+```
+                                  [ User / CLI Workflow Request ]
+                                                 │
+                                                 ▼
+                               ┌───────────────────────────────────┐
+                               │       Agent Pipeline Orchestrator │
+                               │  (DAG Graph / Task State Machine) │
+                               └─────────────────┬─────────────────┘
+                                                 │
+                                                 ▼
+                               ┌───────────────────────────────────┐
+                               │      Adaptive Task Router         │
+                               │ (Capabilities / Workload / Roles) │
+                               └─────────────────┬─────────────────┘
+                                                 │ Assigned Agent
+                                                 ▼
+                 ┌───────────────────────────────────────────────────────────────┐
+                 │                   Autonomous Execution Step                   │
+                 │                                                               │
+                 │   ┌─────────────────────┐           ┌─────────────────────┐   │
+                 │   │ Tool Dispatcher     │           │ Reflection Engine   │   │
+                 │   │ (kv_put / get / del)│           │ (Critique / Invars) │   │
+                 │   └──────────┬──────────┘           └──────────┬──────────┘   │
+                 │              │                                 │              │
+                 │              v                                 v              │
+                 │   ┌─────────────────────┐           ┌─────────────────────┐   │
+                 │   │ FlashStore Engine   │           │ Convergence Check   │   │
+                 │   │ (Direct LSM-Tree)   │           │ (Iterative Revision)│   │
+                 │   └─────────────────────┘           └─────────────────────┘   │
+                 └───────────────────────────────┬───────────────────────────────┘
+                                                 │ Output & Reflections
+                                                 ▼
+                               ┌───────────────────────────────────┐
+                               │  Working & Episodic Memory Store  │
+                               │ (Blackboard / Associative Recall) │
+                               └─────────────────┬─────────────────┘
+                                                 │
+                                                 ▼
+                               ┌───────────────────────────────────┐
+                               │ Atomic FlashStore Checkpoint      │
+                               │ (WriteBatch to WAL & SSTables)    │
+                               └───────────────────────────────────┘
 ```
 
 ---
@@ -240,6 +287,13 @@ FlashStore includes a native high-performance RAG and reranker layer on top of t
 | **Semantic Query Cache** | ✅ | Multi-tier LRU cache with cosine similarity threshold and TTL |
 | **Context Assembly** | ✅ | Token budgeting, truncation (`TruncateLast`), and citations (`[1]`) |
 | **IR Telemetry & Eval** | ✅ | Built-in MRR, Recall@K, Precision@K, NDCG@K, and stage latency |
+| **DAG Task Scheduling** | ✅ | Multi-agent DAG task graphs with topological ordering and cycle checks |
+| **Adaptive Task Routing** | ✅ | Heuristic assignment balancing capabilities, role affinity, and load |
+| **Stateful Reflection** | ✅ | Multi-iteration self-correction with critiques and invariant guards |
+| **Dynamic Tool Registry** | ✅ | Parameter validation, OpenAI/MCP schemas, and direct LSM-Tree tools |
+| **Dual-Tier Memory** | ✅ | In-memory blackboard + persistent episodic memory with associative recall |
+| **Atomic Swarm Checkpoints**| ✅ | Full workflow and memory state persisted via atomic `WriteBatch` |
+| **Pub/Sub Telemetry** | ✅ | Decoupled event broadcaster and percentile latency tracking ($p50/p90/p99$) |
 
 ---
 
@@ -515,6 +569,84 @@ fn rag_example(db: Arc<FlashStore>) -> Result<()> {
 }
 ```
 
+### Autonomous Multi-Agent Swarm Workflow API
+
+FlashStore provides `AgentPipeline`, `AgentEngine`, `AgentDefinition`, `AgentTask`, and `AgentMemoryStore` for constructing autonomous multi-agent systems directly on top of the storage engine:
+
+```rust
+use flash_store::prelude::*;
+use std::sync::Arc;
+
+fn swarm_example(db: Arc<FlashStore>) -> Result<()> {
+    // 1. Initialize AgentPipeline bound to persistent FlashStore storage
+    let mut pipeline = AgentPipeline::new("analytics-workflow").with_store(db.clone());
+
+    // 2. Register specialized agents with distinct capabilities
+    let planner = AgentDefinition::builder("agent-planner", AgentRole::Planner)
+        .name("Swarm Planner")
+        .capability(AgentCapability::TextGeneration)
+        .build();
+
+    let storage_coder = AgentDefinition::builder("agent-coder", AgentRole::Coder)
+        .name("Storage Engineer")
+        .capability(AgentCapability::StorageOps)
+        .capability(AgentCapability::ToolCalling)
+        .build();
+
+    let verifier = AgentDefinition::builder("agent-verifier", AgentRole::Verifier)
+        .name("Invariant Verifier")
+        .capability(AgentCapability::Reflection)
+        .capability(AgentCapability::TextGeneration)
+        .max_iterations(4)
+        .build();
+
+    pipeline.register_agent(planner)?;
+    pipeline.register_agent(storage_coder)?;
+    pipeline.register_agent(verifier)?;
+
+    // 3. Submit DAG tasks with dependencies
+    let task_plan = AgentTask::builder("task-1", "Design Metrics Schema")
+        .priority(TaskPriority::High)
+        .require_capability(AgentCapability::TextGeneration)
+        .build();
+
+    let task_write = AgentTask::builder("task-2", "Store Metric Point")
+        .priority(TaskPriority::Critical)
+        .require_capability(AgentCapability::StorageOps)
+        .require_capability(AgentCapability::ToolCalling)
+        .input_context(serde_json::json!({
+            "required_tool": "kv_put",
+            "tool_args": {
+                "key": "sensor:reading:001",
+                "value": "{\"temp\": 23.4, \"humidity\": 58.1}"
+            }
+        }))
+        .build();
+
+    let task_verify = AgentTask::builder("task-3", "Verify Metric Integrity")
+        .priority(TaskPriority::Medium)
+        .require_capability(AgentCapability::Reflection)
+        .require_capability(AgentCapability::TextGeneration)
+        .build();
+
+    pipeline.submit_task(task_plan, &[])?;
+    pipeline.submit_task(task_write, &["task-1".into()])?;
+    pipeline.submit_task(task_verify, &["task-2".into()])?;
+
+    // 4. Execute workflow following topological order
+    let summary = pipeline.run()?;
+    println!("Completed {} tasks in {} ms", summary.completed_tasks, summary.total_duration_ms);
+
+    // 5. Query episodic memory via associative recall
+    let recalled = pipeline.memory().recall("sensor reading", 3)?;
+    for hit in recalled {
+        println!("Memory (score: {:.3}): {}", hit.score, hit.memory.content);
+    }
+
+    Ok(())
+}
+```
+
 ---
 
 ## 💻 Command Line Interface (`flash-cli`)
@@ -538,6 +670,8 @@ Commands:
   inspect  Inspect an SSTable file
   bench    Built-in lightweight benchmark
   repl     Start interactive REPL
+  rag      RAG hybrid retrieval, cross-encoder reranking, and document ingestion
+  agent    Autonomous multi-agent workflow orchestration, task execution, and tools
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -774,6 +908,141 @@ flash-cli --path ./my_db rag eval --samples-file benchmarks/eval_queries.json --
 
 ---
 
+### Autonomous Multi-Agent Swarm Commands (`flash-cli agent`)
+
+The `flash-cli agent` subcommands orchestrate autonomous multi-agent task execution, dynamic tool calling, stateful reflection loops, and episodic memory directly from the command line or REPL.
+
+#### 1. Execute an Autonomous Task (`run`)
+```bash
+# Submit and run an autonomous task
+flash-cli --path ./my_db agent run "Calculate the maximum block cache capacity" --priority high
+
+# Run a task requiring specific capabilities and tool arguments
+flash-cli --path ./my_db agent run "Store metric baseline" \
+  --capabilities storage_ops,tool_calling \
+  --input '{"required_tool":"kv_put","tool_args":{"key":"config:workers","value":"8"}}'
+
+# JSON output envelope with full execution report
+flash-cli --path ./my_db agent run "Analyze query patterns" --format json
+```
+
+#### 2. Execute a Multi-Task DAG Workflow (`workflow`)
+Execute complex interdependent tasks defined in a JSON file:
+
+```bash
+flash-cli --path ./my_db agent workflow --file ./data_pipeline.json
+```
+
+```json
+{
+  "workflow_id": "ingest-pipeline",
+  "tasks": [
+    {
+      "id": "step-1",
+      "title": "Define Schema",
+      "description": "Establish telemetry key format",
+      "priority": "high",
+      "capabilities": ["text_generation"],
+      "depends_on": []
+    },
+    {
+      "id": "step-2",
+      "title": "Store Baseline",
+      "description": "Insert baseline telemetry metric via kv_put",
+      "priority": "critical",
+      "capabilities": ["storage_ops", "tool_calling"],
+      "input": {
+        "required_tool": "kv_put",
+        "tool_args": { "key": "telemetry:init", "value": "1" }
+      },
+      "depends_on": ["step-1"]
+    },
+    {
+      "id": "step-3",
+      "title": "Verify Invariants",
+      "description": "Reflect on stored records and verify data invariants",
+      "priority": "medium",
+      "capabilities": ["reflection"],
+      "depends_on": ["step-2"]
+    }
+  ]
+}
+```
+
+#### 3. Swarm Agent Registration & Inspection (`register`, `agents`)
+```bash
+# Register a custom specialized agent
+flash-cli --path ./my_db agent register \
+  --id auditor-01 \
+  --name "Security & Invariant Auditor" \
+  --role verifier \
+  --capabilities reflection,text_generation \
+  --max-iterations 6
+
+# List all active registered agents
+flash-cli --path ./my_db agent agents --format text
+```
+
+#### 4. Task Management & Detailed Inspection (`tasks`, `get-task`)
+```bash
+# List all workflow tasks filtered by status
+flash-cli --path ./my_db agent tasks --status completed
+
+# Inspect detailed task execution history, critique, and output
+flash-cli --path ./my_db agent get-task step-2 --format json
+```
+
+#### 5. Dynamic Tool Listing & Direct Invocation (`tools`, `call`)
+```bash
+# List all registered swarm tools, parameter types, and descriptions
+flash-cli --path ./my_db agent tools
+
+# Invoke an LSM-Tree tool directly with JSON arguments
+flash-cli --path ./my_db agent call kv_put '{"key":"system:status","value":"ready"}'
+flash-cli --path ./my_db agent call kv_get '{"key":"system:status"}'
+flash-cli --path ./my_db agent call calculator '{"expression":"2^16 / 4"}'
+```
+
+#### 6. Episodic Memory & Associative Recall (`memory`)
+```bash
+# Search episodic memory using query-relevance and recency weighting
+flash-cli --path ./my_db agent memory --query "telemetry baseline" --limit 5
+
+# Explicitly record an experience or learning into episodic memory
+flash-cli --path ./my_db agent memory --record "Compaction completes faster with 4MB blocks" \
+  --agent coder-01 \
+  --importance 0.85
+```
+
+#### 7. Swarm Telemetry & Checkpointing (`stats`, `checkpoint`)
+```bash
+# Display multi-agent swarm telemetry, latency percentiles, and task throughput
+flash-cli --path ./my_db agent stats
+
+# Save full workflow and memory checkpoint to FlashStore SSTables
+flash-cli --path ./my_db agent checkpoint --workflow default
+```
+
+#### 8. Interactive REPL `AGENT` Shell Commands
+Inside `flash-cli repl`:
+```text
+flash-store [./my_db]> AGENT AGENTS
+Active Swarm Agents:
+  - coder-01 [coder] (Capabilities: code_execution, storage_ops, tool_calling)
+  - critic-01 [critic] (Capabilities: reflection)
+
+flash-store [./my_db]> AGENT RUN "Calculate partition sizes"
+Task completed successfully. (1.4ms)
+
+flash-store [./my_db]> AGENT CALL kv_put {"key":"sample","value":"active"}
+Tool 'kv_put' executed successfully. (0.3ms)
+
+flash-store [./my_db]> AGENT STATS
+Completed Tasks: 5 | Failed: 0 | Avg Latency: 1.1ms
+```
+
+---
+
 ## 🔬 Engine Internals Deep Dive
 
 ### 1. Write-Ahead Log (WAL)
@@ -840,6 +1109,15 @@ FlashStore implements a multi-tier compaction scheduler:
 - **Reciprocal Rank Fusion (RRF)**: Combines dense and sparse rank candidate lists without requiring score scale calibration.
 - **Lexical-Semantic Cross-Encoder**: Scores candidate passages against queries using token coverage, phrase/bigram alignment, and term proximity.
 - **Semantic Vector Query Cache**: Intercepts queries using exact text matching and cosine similarity thresholding to return cached hits in sub-millisecond time.
+
+### 9. Autonomous Swarm Task Graphs, Adaptive Routing & Reflection
+
+- **DAG Task Dependency Scheduling**: Tasks are scheduled in topological order, automatically checking preconditions, detecting circular dependencies, and preventing premature execution.
+- **Adaptive Multi-Factor Routing**: Matches tasks to agents by evaluating a composite heuristic scoring function combining capability requirements ($w_c$), role affinity ($w_a$), active queue depth / workload ($w_w$), and priority preemption ($w_p$).
+- **Stateful Reflection Loops**: Before completing tasks requiring reflection, iterative critique cycles evaluate accuracy, completeness, formatting, and domain invariants. If convergence is reached or plateau detected, the solution is approved; otherwise, a targeted revision prompt is generated.
+- **Integrated FlashStore Tools**: Autonomous agents can directly invoke registered tools with full parameter validation, including native LSM-Tree operations (`kv_put`, `kv_get`, `kv_delete`, `kv_scan`), enabling agents to read and modify storage state during execution.
+- **Cognitive Dual-Tier Memory**: Features an in-memory working blackboard for fast inter-agent scratchpad communication alongside persistent episodic memory indexed by recency decay, importance weighting, and semantic token relevance.
+- **Atomic Checkpoint Serialization**: Complete workflow state (tasks, agents, messages, blackboard, and episodic records) commits atomically to the WAL and SSTables via `WriteBatch`, ensuring zero corruption on crash and enabling seamless restart recovery.
 
 ---
 
@@ -1008,13 +1286,24 @@ Demonstrates document ingestion with metadata, text chunking, dense vector embed
 cargo run --example rag_pipeline
 ```
 
+### Autonomous Multi-Agent Swarm Workflow
+
+Full source in [`examples/agent_workflow.rs`](examples/agent_workflow.rs):
+
+Demonstrates end-to-end multi-agent orchestration, registering specialized agents (Planner, Storage Coder, Verifier), defining a DAG task dependency graph, automated tool calling against FlashStore (`kv_put`), stateful reflection loops with invariant checking, associative episodic memory recall, and full checkpoint recovery:
+
+```bash
+cargo run --example agent_workflow
+```
+
 ---
 
 ## 📚 Deep Technical Documentation
 
 Detailed architecture specifications, binary formats, and algorithms are available in the [`docs/`](docs/) directory:
 
-- 🏛 **[Architecture Guide](docs/ARCHITECTURE.md)**: High-level overview, subsystem components, read/write lifecycles, and concurrency lock hierarchy.
+- 🤖 **[Autonomous Multi-Agent Swarm Guide](docs/AGENT_WORKFLOW.md)**: Swarm orchestration, DAG task dependencies, adaptive routing, stateful reflection loops, dynamic tool calling, episodic memory, and telemetry.
+- 🏛 **[Architecture Guide](docs/ARCHITECTURE.md)**: High-level overview, 3-tier subsystem components, read/write lifecycles, and concurrency lock hierarchy.
 - 🧠 **[RAG Retrieval, Reranking & Caching Guide](docs/RAG_RERANKER.md)**: Hybrid BM25/vector search, Reciprocal Rank Fusion, cross-encoder scoring, MMR diversity, semantic cache, and prompt assembly.
 - 💾 **[SSTable Binary Format Specification](docs/SSTABLE_FORMAT.md)**: Byte-level layout of Data Blocks, Bloom Filters, Meta Index, Index Blocks, and 48-byte Footers.
 - 📜 **[Write-Ahead Log (WAL) & Recovery Protocol](docs/WAL_RECOVERY.md)**: CRC32-IEEE framing, synchronous vs asynchronous durability, and crash recovery algorithm.
