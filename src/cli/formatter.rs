@@ -534,12 +534,13 @@ pub fn format_agent_list(agents: &[AgentDefinition], format: OutputFormat) {
                 );
                 println!("   Max Iterations: {}", a.max_iterations);
                 if !a.system_prompt.is_empty() {
-                    let prompt_snippet = if a.system_prompt.len() > 80 {
-                        format!("{}...", &a.system_prompt[..80])
+                    let prompt_snippet = safe_truncate_str(&a.system_prompt, 80);
+                    let suffix = if a.system_prompt.len() > 80 {
+                        "..."
                     } else {
-                        a.system_prompt.clone()
+                        ""
                     };
-                    println!("   Prompt:         {}", prompt_snippet);
+                    println!("   Prompt:         {}{}", prompt_snippet, suffix);
                 }
             }
         }
@@ -590,20 +591,14 @@ pub fn format_task_list(tasks: &[AgentTask], format: OutputFormat) {
                     t.priority.as_str(),
                     assigned
                 );
-                let desc = if t.description.len() > 100 {
-                    format!("{}...", &t.description[..100])
-                } else {
-                    t.description.clone()
-                };
-                println!("   Desc: {}", desc);
+                let desc_truncated = safe_truncate_str(&t.description, 100);
+                let desc_suffix = if t.description.len() > 100 { "..." } else { "" };
+                println!("   Desc: {}{}", desc_truncated, desc_suffix);
                 if let Some(ref out) = t.output_artifacts {
                     let out_str = out.to_string();
-                    let out_snippet = if out_str.len() > 80 {
-                        format!("{}...", &out_str[..80])
-                    } else {
-                        out_str
-                    };
-                    println!("   Out:  {}", out_snippet);
+                    let out_truncated = safe_truncate_str(&out_str, 80);
+                    let out_suffix = if out_str.len() > 80 { "..." } else { "" };
+                    println!("   Out:  {}{}", out_truncated, out_suffix);
                 }
             }
         }

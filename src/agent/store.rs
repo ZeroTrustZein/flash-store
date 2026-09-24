@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use serde_json;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::agent::types::{
     AgentDefinition, AgentId, AgentMessage, AgentStorageKey, AgentTask, ReflectionCritique, TaskId,
@@ -35,15 +35,62 @@ impl AgentStoreAdapter {
     }
 
     // ========================================================================
+    // Generic Storage Helpers
+    // ========================================================================
+
+    fn serialize_val<T: Serialize>(entity: &str, val: &T) -> Result<Vec<u8>> {
+        serde_json::to_vec(val)
+            .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize {}: {}", entity, e)))
+    }
+
+    fn deserialize_val<T: DeserializeOwned>(entity: &str, bytes: &[u8]) -> Result<T> {
+        serde_json::from_slice(bytes)
+            .map_err(|e| FlashStoreError::Agent(format!("Failed to deserialize {}: {}", entity, e)))
+    }
+
+    fn put_entity<T: Serialize>(&self, entity: &str, key: String, val: &T) -> Result<()> {
+        let bytes = Self::serialize_val(entity, val)?;
+        self.store.put(key.into_bytes(), bytes)
+    }
+
+    fn get_entity<T: DeserializeOwned>(&self, entity: &str, key: &str) -> Result<Option<T>> {
+        match self.store.get(key.as_bytes())? {
+            Some(bytes) => Ok(Some(Self::deserialize_val(entity, &bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn scan_entities<T: DeserializeOwned>(&self, entity: &str, prefix: &str) -> Result<Vec<T>> {
+        let prefix_bytes = prefix.as_bytes();
+        let entries = self
+            .store
+            .scan(Some(Bytes::copy_from_slice(prefix_bytes)), None)?;
+
+        let mut results = Vec::new();
+        for (k, v) in entries {
+            if !k.starts_with(prefix_bytes) {
+                break;
+            }
+            results.push(Self::deserialize_val(entity, &v)?);
+        }
+        Ok(results)
+    }
+
+    fn delete_entity(&self, key: &str) -> Result<bool> {
+        let exists = self.store.get(key.as_bytes())?.is_some();
+        if exists {
+            self.store.delete(key.as_bytes())?;
+        }
+        Ok(exists)
+    }
+
+    // ========================================================================
     // Agent Definitions
     // ========================================================================
 
     /// Persists an agent definition to storage.
     pub fn persist_agent(&self, agent: &AgentDefinition) -> Result<()> {
-        let key = AgentStorageKey::agent_key(&agent.id);
-        let val = serde_json::to_vec(agent)
-            .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize agent: {}", e)))?;
-        self.store.put(key.into_bytes(), val)
+        self.put_entity("agent", AgentStorageKey::agent_key(&agent.id), agent)
     }
 
     /// Persists a batch of agent definitions atomically.
@@ -54,8 +101,7 @@ impl AgentStoreAdapter {
         let mut batch = WriteBatch::new();
         for agent in agents {
             let key = AgentStorageKey::agent_key(&agent.id);
-            let val = serde_json::to_vec(agent)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize agent: {}", e)))?;
+            let val = Self::serialize_val("agent", agent)?;
             batch.put(key.into_bytes(), val);
         }
         self.store.write_batch(batch)
@@ -63,46 +109,17 @@ impl AgentStoreAdapter {
 
     /// Loads an agent definition by its ID.
     pub fn load_agent(&self, agent_id: &AgentId) -> Result<Option<AgentDefinition>> {
-        let key = AgentStorageKey::agent_key(agent_id);
-        match self.store.get(key.as_bytes())? {
-            Some(bytes) => {
-                let agent: AgentDefinition = serde_json::from_slice(&bytes).map_err(|e| {
-                    FlashStoreError::Agent(format!("Failed to deserialize agent: {}", e))
-                })?;
-                Ok(Some(agent))
-            }
-            None => Ok(None),
-        }
+        self.get_entity("agent", &AgentStorageKey::agent_key(agent_id))
     }
 
     /// Lists all persisted agent definitions.
     pub fn list_agents(&self) -> Result<Vec<AgentDefinition>> {
-        let prefix = AgentStorageKey::PREFIX_AGENT.as_bytes();
-        let entries = self
-            .store
-            .scan(Some(Bytes::copy_from_slice(prefix)), None)?;
-
-        let mut agents = Vec::new();
-        for (k, v) in entries {
-            if !k.starts_with(prefix) {
-                break;
-            }
-            let agent: AgentDefinition = serde_json::from_slice(&v).map_err(|e| {
-                FlashStoreError::Agent(format!("Failed to deserialize agent: {}", e))
-            })?;
-            agents.push(agent);
-        }
-        Ok(agents)
+        self.scan_entities("agent", AgentStorageKey::PREFIX_AGENT)
     }
 
     /// Deletes an agent definition from storage. Returns `true` if it existed.
     pub fn delete_agent(&self, agent_id: &AgentId) -> Result<bool> {
-        let key = AgentStorageKey::agent_key(agent_id);
-        let exists = self.store.get(key.as_bytes())?.is_some();
-        if exists {
-            self.store.delete(key.into_bytes())?;
-        }
-        Ok(exists)
+        self.delete_entity(&AgentStorageKey::agent_key(agent_id))
     }
 
     // ========================================================================
@@ -111,10 +128,7 @@ impl AgentStoreAdapter {
 
     /// Persists a single agent task to storage.
     pub fn persist_task(&self, task: &AgentTask) -> Result<()> {
-        let key = AgentStorageKey::task_key(&task.id);
-        let val = serde_json::to_vec(task)
-            .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize task: {}", e)))?;
-        self.store.put(key.into_bytes(), val)
+        self.put_entity("task", AgentStorageKey::task_key(&task.id), task)
     }
 
     /// Persists multiple tasks in a single atomic batch.
@@ -125,8 +139,7 @@ impl AgentStoreAdapter {
         let mut batch = WriteBatch::new();
         for task in tasks {
             let key = AgentStorageKey::task_key(&task.id);
-            let val = serde_json::to_vec(task)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize task: {}", e)))?;
+            let val = Self::serialize_val("task", task)?;
             batch.put(key.into_bytes(), val);
         }
         self.store.write_batch(batch)
@@ -134,36 +147,12 @@ impl AgentStoreAdapter {
 
     /// Loads a task by its ID.
     pub fn load_task(&self, task_id: &TaskId) -> Result<Option<AgentTask>> {
-        let key = AgentStorageKey::task_key(task_id);
-        match self.store.get(key.as_bytes())? {
-            Some(bytes) => {
-                let task: AgentTask = serde_json::from_slice(&bytes).map_err(|e| {
-                    FlashStoreError::Agent(format!("Failed to deserialize task: {}", e))
-                })?;
-                Ok(Some(task))
-            }
-            None => Ok(None),
-        }
+        self.get_entity("task", &AgentStorageKey::task_key(task_id))
     }
 
     /// Lists all persisted tasks.
     pub fn list_tasks(&self) -> Result<Vec<AgentTask>> {
-        let prefix = AgentStorageKey::PREFIX_TASK.as_bytes();
-        let entries = self
-            .store
-            .scan(Some(Bytes::copy_from_slice(prefix)), None)?;
-
-        let mut tasks = Vec::new();
-        for (k, v) in entries {
-            if !k.starts_with(prefix) {
-                break;
-            }
-            let task: AgentTask = serde_json::from_slice(&v).map_err(|e| {
-                FlashStoreError::Agent(format!("Failed to deserialize task: {}", e))
-            })?;
-            tasks.push(task);
-        }
-        Ok(tasks)
+        self.scan_entities("task", AgentStorageKey::PREFIX_TASK)
     }
 
     /// Lists tasks filtered by their status.
@@ -174,12 +163,7 @@ impl AgentStoreAdapter {
 
     /// Deletes a task from storage. Returns `true` if it existed.
     pub fn delete_task(&self, task_id: &TaskId) -> Result<bool> {
-        let key = AgentStorageKey::task_key(task_id);
-        let exists = self.store.get(key.as_bytes())?.is_some();
-        if exists {
-            self.store.delete(key.into_bytes())?;
-        }
-        Ok(exists)
+        self.delete_entity(&AgentStorageKey::task_key(task_id))
     }
 
     // ========================================================================
@@ -192,25 +176,19 @@ impl AgentStoreAdapter {
         task_id: &TaskId,
         critique: &ReflectionCritique,
     ) -> Result<()> {
-        let key = AgentStorageKey::reflection_key(task_id);
-        let val = serde_json::to_vec(critique).map_err(|e| {
-            FlashStoreError::Agent(format!("Failed to serialize reflection critique: {}", e))
-        })?;
-        self.store.put(key.into_bytes(), val)
+        self.put_entity(
+            "reflection critique",
+            AgentStorageKey::reflection_key(task_id),
+            critique,
+        )
     }
 
     /// Loads a reflection critique for a task.
     pub fn load_reflection_critique(&self, task_id: &TaskId) -> Result<Option<ReflectionCritique>> {
-        let key = AgentStorageKey::reflection_key(task_id);
-        match self.store.get(key.as_bytes())? {
-            Some(bytes) => {
-                let critique: ReflectionCritique = serde_json::from_slice(&bytes).map_err(|e| {
-                    FlashStoreError::Agent(format!("Failed to deserialize critique: {}", e))
-                })?;
-                Ok(Some(critique))
-            }
-            None => Ok(None),
-        }
+        self.get_entity(
+            "reflection critique",
+            &AgentStorageKey::reflection_key(task_id),
+        )
     }
 
     // ========================================================================
@@ -219,30 +197,17 @@ impl AgentStoreAdapter {
 
     /// Persists an inter-agent message within a workflow namespace.
     pub fn persist_message(&self, workflow_id: &str, message: &AgentMessage) -> Result<()> {
-        let key = AgentStorageKey::message_key(workflow_id, &message.message_id);
-        let val = serde_json::to_vec(message)
-            .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize message: {}", e)))?;
-        self.store.put(key.into_bytes(), val)
+        self.put_entity(
+            "message",
+            AgentStorageKey::message_key(workflow_id, &message.message_id),
+            message,
+        )
     }
 
     /// Loads all messages for a specific workflow, sorted in chronological order.
     pub fn load_messages(&self, workflow_id: &str) -> Result<Vec<AgentMessage>> {
         let prefix = format!("{}{}:", AgentStorageKey::PREFIX_MESSAGE, workflow_id);
-        let prefix_bytes = prefix.as_bytes();
-        let entries = self
-            .store
-            .scan(Some(Bytes::copy_from_slice(prefix_bytes)), None)?;
-
-        let mut messages = Vec::new();
-        for (k, v) in entries {
-            if !k.starts_with(prefix_bytes) {
-                break;
-            }
-            let msg: AgentMessage = serde_json::from_slice(&v).map_err(|e| {
-                FlashStoreError::Agent(format!("Failed to deserialize message: {}", e))
-            })?;
-            messages.push(msg);
-        }
+        let mut messages: Vec<AgentMessage> = self.scan_entities("message", &prefix)?;
         messages.sort_by_key(|m| m.timestamp);
         Ok(messages)
     }
@@ -253,55 +218,29 @@ impl AgentStoreAdapter {
 
     /// Persists a snapshot/checkpoint of the workflow state.
     pub fn persist_workflow_state(&self, state: &WorkflowState) -> Result<()> {
-        let key = AgentStorageKey::workflow_key(&state.workflow_id);
-        let val = serde_json::to_vec(state).map_err(|e| {
-            FlashStoreError::Agent(format!("Failed to serialize workflow state: {}", e))
-        })?;
-        self.store.put(key.into_bytes(), val)
+        self.put_entity(
+            "workflow state",
+            AgentStorageKey::workflow_key(&state.workflow_id),
+            state,
+        )
     }
 
     /// Loads a workflow checkpoint by workflow ID.
     pub fn load_workflow_state(&self, workflow_id: &str) -> Result<Option<WorkflowState>> {
-        let key = AgentStorageKey::workflow_key(workflow_id);
-        match self.store.get(key.as_bytes())? {
-            Some(bytes) => {
-                let state: WorkflowState = serde_json::from_slice(&bytes).map_err(|e| {
-                    FlashStoreError::Agent(format!("Failed to deserialize workflow state: {}", e))
-                })?;
-                Ok(Some(state))
-            }
-            None => Ok(None),
-        }
+        self.get_entity(
+            "workflow state",
+            &AgentStorageKey::workflow_key(workflow_id),
+        )
     }
 
     /// Lists all stored workflow checkpoints.
     pub fn list_workflows(&self) -> Result<Vec<WorkflowState>> {
-        let prefix = AgentStorageKey::PREFIX_WORKFLOW.as_bytes();
-        let entries = self
-            .store
-            .scan(Some(Bytes::copy_from_slice(prefix)), None)?;
-
-        let mut workflows = Vec::new();
-        for (k, v) in entries {
-            if !k.starts_with(prefix) {
-                break;
-            }
-            let wf: WorkflowState = serde_json::from_slice(&v).map_err(|e| {
-                FlashStoreError::Agent(format!("Failed to deserialize workflow state: {}", e))
-            })?;
-            workflows.push(wf);
-        }
-        Ok(workflows)
+        self.scan_entities("workflow state", AgentStorageKey::PREFIX_WORKFLOW)
     }
 
     /// Deletes a workflow and all associated state checkpoints.
     pub fn delete_workflow_state(&self, workflow_id: &str) -> Result<bool> {
-        let key = AgentStorageKey::workflow_key(workflow_id);
-        let exists = self.store.get(key.as_bytes())?.is_some();
-        if exists {
-            self.store.delete(key.into_bytes())?;
-        }
-        Ok(exists)
+        self.delete_entity(&AgentStorageKey::workflow_key(workflow_id))
     }
 
     /// Checkpoints an entire workflow atomically: state, all active tasks, and messages.
@@ -310,25 +249,20 @@ impl AgentStoreAdapter {
 
         // 1. Workflow state
         let wf_key = AgentStorageKey::workflow_key(&state.workflow_id);
-        let wf_val = serde_json::to_vec(state).map_err(|e| {
-            FlashStoreError::Agent(format!("Failed to serialize workflow state: {}", e))
-        })?;
+        let wf_val = Self::serialize_val("workflow state", state)?;
         batch.put(wf_key.into_bytes(), wf_val);
 
         // 2. All tasks in workflow
         for task in state.tasks.values() {
             let task_key = AgentStorageKey::task_key(&task.id);
-            let task_val = serde_json::to_vec(task)
-                .map_err(|e| FlashStoreError::Agent(format!("Failed to serialize task: {}", e)))?;
+            let task_val = Self::serialize_val("task", task)?;
             batch.put(task_key.into_bytes(), task_val);
         }
 
         // 3. All messages in workflow
         for msg in &state.message_history {
             let msg_key = AgentStorageKey::message_key(&state.workflow_id, &msg.message_id);
-            let msg_val = serde_json::to_vec(msg).map_err(|e| {
-                FlashStoreError::Agent(format!("Failed to serialize message: {}", e))
-            })?;
+            let msg_val = Self::serialize_val("message", msg)?;
             batch.put(msg_key.into_bytes(), msg_val);
         }
 

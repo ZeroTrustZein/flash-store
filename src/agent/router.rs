@@ -21,18 +21,9 @@ use crate::error::{FlashStoreError, Result};
 
 /// Computes the capability match score between task requirements and an agent's capability set.
 /// Returns a score in `[0.0, 1.0]`. If no capabilities are required, returns `1.0`.
+#[inline]
 pub fn score_capability_match(task: &AgentTask, agent: &AgentDefinition) -> f32 {
-    if task.required_capabilities.is_empty() {
-        return 1.0;
-    }
-
-    let matched = task
-        .required_capabilities
-        .iter()
-        .filter(|cap| agent.has_capability(**cap))
-        .count();
-
-    matched as f32 / task.required_capabilities.len() as f32
+    task.capability_match_score(agent)
 }
 
 /// Computes role affinity score between a task and an agent's architectural role.

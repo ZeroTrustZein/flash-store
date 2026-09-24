@@ -51,12 +51,8 @@ pub fn compute_aggregate_score(critiques: &[ReflectionCritique]) -> f32 {
         return 0.0;
     }
 
-    let mut total_score = 0.0;
-    for c in critiques {
-        total_score += c.score.clamp(0.0, 1.0);
-    }
-
-    total_score / critiques.len() as f32
+    let sum: f32 = critiques.iter().map(|c| c.score.clamp(0.0, 1.0)).sum();
+    sum / critiques.len() as f32
 }
 
 /// Checks whether any critical criteria failed their minimum threshold.

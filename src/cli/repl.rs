@@ -540,14 +540,7 @@ pub fn execute_agent_repl(
                 ));
             }
             let prompt = sub_args.join(" ");
-            let task_id = format!(
-                "task_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_micros()
-            );
-            let task = AgentTask::builder(task_id.as_str(), prompt.as_str())
+            let task = AgentTask::builder(TaskId::generate(), prompt.as_str())
                 .description(&prompt)
                 .priority(TaskPriority::Medium)
                 .build();

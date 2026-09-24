@@ -322,20 +322,25 @@ impl AgentMemoryStore {
 
     /// Fast lexical Jaccard/overlap fallback between query and memory content.
     fn lexical_overlap(query: &str, content: &str) -> f32 {
-        let q_words: std::collections::HashSet<String> =
-            query.split_whitespace().map(|w| w.to_lowercase()).collect();
-        let c_words: std::collections::HashSet<String> = content
-            .split_whitespace()
-            .map(|w| w.to_lowercase())
-            .collect();
+        let q_words: std::collections::HashSet<&str> = query.split_whitespace().collect();
+        let c_words: std::collections::HashSet<&str> = content.split_whitespace().collect();
 
         if q_words.is_empty() || c_words.is_empty() {
             return 0.0;
         }
 
-        let intersection = q_words.intersection(&c_words).count();
-        let union = q_words.union(&c_words).count();
-        intersection as f32 / union as f32
+        let mut intersection = 0;
+        for qw in &q_words {
+            if c_words.iter().any(|cw| cw.eq_ignore_ascii_case(qw)) {
+                intersection += 1;
+            }
+        }
+        let union = q_words.len() + c_words.len() - intersection;
+        if union == 0 {
+            0.0
+        } else {
+            intersection as f32 / union as f32
+        }
     }
 
     // ========================================================================

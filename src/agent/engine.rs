@@ -99,7 +99,8 @@ impl TaskGraph {
 
     /// Computes parallel execution tiers where tasks within each tier can execute concurrently.
     pub fn topological_tiers(&self) -> Result<Vec<Vec<TaskId>>> {
-        let mut in_degrees: HashMap<TaskId, usize> = HashMap::with_capacity(self.dependencies.len());
+        let mut in_degrees: HashMap<TaskId, usize> =
+            HashMap::with_capacity(self.dependencies.len());
         for (task, deps) in &self.dependencies {
             in_degrees.insert(task.clone(), deps.len());
         }

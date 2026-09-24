@@ -12,6 +12,7 @@ use crate::agent::{
     AgentRole, AgentTask, EpisodicMemoryEntry, TaskId, TaskPriority, TaskStatus, ToolOutput,
 };
 use crate::cli::formatter;
+pub use crate::cli::rag::parse_output_format;
 use crate::cli::{open_db, GlobalOpts, OutputFormat};
 use crate::error::{FlashStoreError, Result};
 
@@ -245,17 +246,6 @@ pub struct BatchTaskItem {
     pub depends_on: Vec<String>,
 }
 
-/// Parse format string into `OutputFormat`.
-pub fn parse_output_format(s: &str, json_flag: bool) -> OutputFormat {
-    if json_flag || s.eq_ignore_ascii_case("json") {
-        OutputFormat::Json
-    } else if s.eq_ignore_ascii_case("tsv") {
-        OutputFormat::Tsv
-    } else {
-        OutputFormat::Text
-    }
-}
-
 /// Parse priority string into `TaskPriority`.
 pub fn parse_priority(s: &str) -> TaskPriority {
     match s.trim().to_lowercase().as_str() {
@@ -394,18 +384,10 @@ pub fn run_agent_command(cmd: AgentCmd, opts: &GlobalOpts) -> Result<()> {
             })?;
             let fmt = parse_output_format(&format, opts.json);
 
-            let task_id = id.unwrap_or_else(|| {
-                format!(
-                    "task_{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros()
-                )
-            });
+            let task_id = id.map(TaskId::new).unwrap_or_else(TaskId::generate);
 
             let prio = parse_priority(&priority);
-            let mut builder = AgentTask::builder(task_id.as_str(), prompt_text.as_str())
+            let mut builder = AgentTask::builder(task_id, prompt_text.as_str())
                 .description(&prompt_text)
                 .priority(prio);
 
