@@ -11,6 +11,8 @@ use tracing::{debug, error, info, warn};
 use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
 use crate::mcp::config::McpServerConfig;
+use crate::mcp::notifications::McpNotificationBroadcaster;
+use crate::mcp::prompts::{McpGetPromptParams, McpListPromptsResult, McpPromptHandler, McpPromptRegistry};
 use crate::mcp::protocol::{error_codes, JsonRpcError, JsonRpcRequest, JsonRpcResponse, RequestId};
 use crate::mcp::resources::{
     McpListResourcesResult, McpReadResourceResult, McpResourceProvider, McpResourceRegistry,
@@ -18,15 +20,17 @@ use crate::mcp::resources::{
 use crate::mcp::tools::{McpListToolsResult, McpToolCallParams, McpToolHandler, McpToolRegistry};
 use crate::mcp::transport::McpTransport;
 use crate::mcp::types::{
-    Implementation, InitializeParams, InitializeResult, LoggingCapability, PromptsCapability,
-    ResourcesCapability, ServerCapabilities, ToolsCapability,
+    Implementation, InitializeParams, InitializeResult, LoggingCapability, McpLogLevel,
+    PromptsCapability, ResourcesCapability, ServerCapabilities, ToolsCapability,
 };
 
-/// High-level MCP server orchestrating endpoints, tool execution, and resource access.
+/// High-level MCP server orchestrating endpoints, tool execution, resource access, and prompt templates.
 pub struct McpServer {
     config: McpServerConfig,
     tools: Arc<McpToolRegistry>,
     resources: Arc<McpResourceRegistry>,
+    prompts: Arc<McpPromptRegistry>,
+    notifications: Arc<McpNotificationBroadcaster>,
 }
 
 impl McpServer {
@@ -40,19 +44,39 @@ impl McpServer {
             config,
             tools,
             resources,
+            prompts: Arc::new(McpPromptRegistry::new()),
+            notifications: Arc::new(McpNotificationBroadcaster::new()),
         }
     }
 
-    /// Creates an `McpServer` initialized with standard tools and resources backed by `FlashStore`.
+    /// Creates a new `McpServer` with all registries and notification broadcaster explicitly provided.
+    pub fn with_all(
+        config: McpServerConfig,
+        tools: Arc<McpToolRegistry>,
+        resources: Arc<McpResourceRegistry>,
+        prompts: Arc<McpPromptRegistry>,
+    ) -> Self {
+        Self {
+            config,
+            tools,
+            resources,
+            prompts,
+            notifications: Arc::new(McpNotificationBroadcaster::new()),
+        }
+    }
+
+    /// Creates an `McpServer` initialized with standard tools, resources, and prompt templates backed by `FlashStore`.
     pub fn with_store(config: McpServerConfig, store: Arc<FlashStore>) -> Self {
         let tools = Arc::new(McpToolRegistry::with_flash_store(store.clone()));
         let resources = Arc::new(McpResourceRegistry::with_flash_store(store));
-        Self::new(config, tools, resources)
+        let prompts = Arc::new(McpPromptRegistry::with_standard_prompts());
+        Self::with_all(config, tools, resources, prompts)
     }
 
     /// Registers a tool handler into the active tool registry.
     pub fn register_tool(&self, handler: Arc<dyn McpToolHandler>) {
         self.tools.register(handler);
+        self.notifications.notify_tools_changed();
     }
 
     /// Registers a resource provider into the active resource registry.
@@ -62,6 +86,12 @@ impl McpServer {
         provider: Arc<dyn McpResourceProvider>,
     ) {
         self.resources.register(prefix, provider);
+    }
+
+    /// Registers a prompt handler into the active prompt registry.
+    pub fn register_prompt(&self, handler: Arc<dyn McpPromptHandler>) {
+        self.prompts.register(handler);
+        self.notifications.notify_prompts_changed();
     }
 
     /// Accesses the server configuration.
@@ -79,6 +109,16 @@ impl McpServer {
         &self.resources
     }
 
+    /// Accesses the prompt registry.
+    pub fn prompts(&self) -> &Arc<McpPromptRegistry> {
+        &self.prompts
+    }
+
+    /// Accesses the notification broadcaster.
+    pub fn notifications(&self) -> &Arc<McpNotificationBroadcaster> {
+        &self.notifications
+    }
+
     /// Handles a single JSON-RPC 2.0 request and produces an appropriate response.
     pub fn handle_request(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         let id = req.id.clone();
@@ -89,6 +129,9 @@ impl McpServer {
             "tools/call" => self.handle_tools_call(id, req.params),
             "resources/list" => self.handle_resources_list(id),
             "resources/read" => self.handle_resources_read(id, req.params),
+            "prompts/list" => self.handle_prompts_list(id),
+            "prompts/get" => self.handle_prompts_get(id, req.params),
+            "logging/setLevel" => self.handle_logging_set_level(id, req.params),
             "notifications/initialized" => {
                 // Client confirmed initialization; no response needed for notifications
                 JsonRpcResponse::success(id, json!({}))
@@ -144,7 +187,7 @@ impl McpServer {
             },
             prompts: if self.config.enable_prompts {
                 Some(PromptsCapability {
-                    list_changed: Some(false),
+                    list_changed: Some(true),
                 })
             } else {
                 None
@@ -166,7 +209,7 @@ impl McpServer {
             ),
             instructions: Some(
                 "FlashStore MCP Server provides direct access to embedded LSM-tree key-value storage, \
-                 hybrid RAG vector retrieval, and multi-agent workflow operations.".to_string(),
+                 hybrid RAG vector retrieval, autonomous multi-agent orchestration, and prompt templates.".to_string(),
             ),
         };
 
@@ -327,6 +370,118 @@ impl McpServer {
                 ),
             ),
         }
+    }
+
+    fn handle_prompts_list(&self, id: RequestId) -> JsonRpcResponse {
+        if !self.config.enable_prompts {
+            return JsonRpcResponse::error(
+                Some(id),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Prompts capability is disabled",
+                    None,
+                ),
+            );
+        }
+
+        let prompts = self.prompts.list();
+        let result = McpListPromptsResult {
+            prompts,
+            next_cursor: None,
+        };
+
+        match serde_json::to_value(result) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => JsonRpcResponse::error(
+                Some(id),
+                JsonRpcError::internal_error(format!("Serialization failure: {}", e)),
+            ),
+        }
+    }
+
+    fn handle_prompts_get(&self, id: RequestId, params: Option<Value>) -> JsonRpcResponse {
+        if !self.config.enable_prompts {
+            return JsonRpcResponse::error(
+                Some(id),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Prompts capability is disabled",
+                    None,
+                ),
+            );
+        }
+
+        let get_params: McpGetPromptParams = match params {
+            Some(p) => match serde_json::from_value(p) {
+                Ok(gp) => gp,
+                Err(e) => {
+                    return JsonRpcResponse::error(
+                        Some(id),
+                        JsonRpcError::invalid_params(format!("Invalid prompts/get parameters: {}", e)),
+                    );
+                }
+            },
+            None => {
+                return JsonRpcResponse::error(
+                    Some(id),
+                    JsonRpcError::invalid_params("Missing prompts/get parameters"),
+                );
+            }
+        };
+
+        match self.prompts.render(&get_params.name, get_params.arguments.as_ref()) {
+            Ok(prompt_result) => match serde_json::to_value(prompt_result) {
+                Ok(v) => JsonRpcResponse::success(id, v),
+                Err(e) => JsonRpcResponse::error(
+                    Some(id),
+                    JsonRpcError::internal_error(format!("Serialization failure: {}", e)),
+                ),
+            },
+            Err(err) => JsonRpcResponse::error(
+                Some(id),
+                JsonRpcError::new(
+                    error_codes::INVALID_PARAMS,
+                    format!("Prompt render error: {}", err),
+                    None,
+                ),
+            ),
+        }
+    }
+
+    fn handle_logging_set_level(&self, id: RequestId, params: Option<Value>) -> JsonRpcResponse {
+        if !self.config.enable_logging {
+            return JsonRpcResponse::error(
+                Some(id),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Logging capability is disabled",
+                    None,
+                ),
+            );
+        }
+
+        let level_str = match params.and_then(|p| p.get("level").and_then(|l| l.as_str().map(String::from))) {
+            Some(l) => l,
+            None => {
+                return JsonRpcResponse::error(
+                    Some(id),
+                    JsonRpcError::invalid_params("Missing required 'level' parameter"),
+                );
+            }
+        };
+
+        let level = match serde_json::from_value::<McpLogLevel>(Value::String(level_str.clone())) {
+            Ok(lvl) => lvl,
+            Err(_) => {
+                return JsonRpcResponse::error(
+                    Some(id),
+                    JsonRpcError::invalid_params(format!("Unrecognized log level: {}", level_str)),
+                );
+            }
+        };
+
+        self.notifications.set_min_log_level(level);
+        JsonRpcResponse::success(id, json!({ "status": "ok", "level": level }))
     }
 
     /// Runs the server event loop processing requests from the transport until EOF or error.

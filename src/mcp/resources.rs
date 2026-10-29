@@ -189,7 +189,7 @@ impl McpResourceProvider for FlashStorageResourceProvider {
 /// Registry managing and routing MCP resource lookups.
 #[derive(Default)]
 pub struct McpResourceRegistry {
-    providers: RwLock<HashMap<String, Arc<dyn McpResourceProvider>>>,
+    providers: RwLock<HashMap<String, Vec<Arc<dyn McpResourceProvider>>>>,
 }
 
 impl McpResourceRegistry {
@@ -214,15 +214,21 @@ impl McpResourceRegistry {
 
     /// Registers a provider for a specific URI scheme or prefix.
     pub fn register(&self, prefix: impl Into<String>, provider: Arc<dyn McpResourceProvider>) {
-        self.providers.write().insert(prefix.into(), provider);
+        self.providers
+            .write()
+            .entry(prefix.into())
+            .or_default()
+            .push(provider);
     }
 
     /// Aggregates all resources across registered providers.
     pub fn list(&self) -> Vec<McpResourceDefinition> {
         let guard = self.providers.read();
         let mut defs = Vec::new();
-        for provider in guard.values() {
-            defs.extend(provider.list_resources());
+        for provider_list in guard.values() {
+            for provider in provider_list {
+                defs.extend(provider.list_resources());
+            }
         }
         defs.sort_by(|a, b| a.uri.cmp(&b.uri));
         defs
@@ -231,10 +237,12 @@ impl McpResourceRegistry {
     /// Resolves and reads a resource by its exact URI.
     pub fn read(&self, uri: &str) -> Result<Vec<McpResourceContent>> {
         let guard = self.providers.read();
-        for provider in guard.values() {
-            if let Ok(contents) = provider.read_resource(uri) {
-                if !contents.is_empty() {
-                    return Ok(contents);
+        for provider_list in guard.values() {
+            for provider in provider_list {
+                if let Ok(contents) = provider.read_resource(uri) {
+                    if !contents.is_empty() {
+                        return Ok(contents);
+                    }
                 }
             }
         }

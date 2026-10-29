@@ -166,10 +166,11 @@ impl McpContent {
 }
 
 /// Severity level for MCP logging notifications.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum McpLogLevel {
     Debug,
+    #[default]
     Info,
     Notice,
     Warning,
@@ -212,18 +213,20 @@ mod tests {
 
     #[test]
     fn test_server_capabilities_serialization() {
-        let mut caps = ServerCapabilities::default();
-        caps.tools = Some(ToolsCapability {
-            list_changed: Some(true),
-        });
-        caps.resources = Some(ResourcesCapability {
-            subscribe: Some(true),
-            list_changed: Some(false),
-        });
-        caps.prompts = Some(PromptsCapability {
-            list_changed: Some(true),
-        });
-        caps.logging = Some(LoggingCapability {});
+        let caps = ServerCapabilities {
+            tools: Some(ToolsCapability {
+                list_changed: Some(true),
+            }),
+            resources: Some(ResourcesCapability {
+                subscribe: Some(true),
+                list_changed: Some(false),
+            }),
+            prompts: Some(PromptsCapability {
+                list_changed: Some(true),
+            }),
+            logging: Some(LoggingCapability {}),
+            experimental: None,
+        };
 
         let val = serde_json::to_value(&caps).unwrap();
         assert!(val.get("tools").is_some());

@@ -14,13 +14,14 @@ use serde_json::json;
 
 use flash_store::error::Result;
 use flash_store::mcp::{
-    mcp_error_codes, ClientCapabilities, FlashAgentRunTool, FlashDeleteTool, FlashGetTool,
-    FlashPutTool, FlashRagQueryTool, FlashScanTool, FlashStatsTool, FlashStorageResourceProvider,
-    Implementation, InitializeParams, JsonRpcError, JsonRpcNotification, JsonRpcRequest,
-    JsonRpcResponse, McpContent, McpLogLevel, McpResourceContent, McpResourceDefinition,
+    mcp_error_codes, ClientCapabilities, CollectingNotificationObserver, FlashAgentRunTool,
+    FlashDeleteTool, FlashGetTool, FlashPutTool, FlashRagQueryTool, FlashScanTool, FlashStatsTool,
+    FlashStorageResourceProvider, Implementation, InitializeParams, JsonRpcError,
+    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent, McpLogLevel,
+    McpNotificationBroadcaster, McpPromptRegistry, McpResourceContent, McpResourceDefinition,
     McpResourceProvider, McpResourceRegistry, McpServer, McpServerConfig, McpServerConfigBuilder,
-    McpToolDefinition, McpToolHandler, McpToolRegistry, McpToolResult, MockMcpTransport,
-    RequestId, StandardToolSchemas, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
+    McpSubsystem, McpToolDefinition, McpToolHandler, McpToolRegistry, McpToolResult,
+    MockMcpTransport, RequestId, StandardToolSchemas, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
     MCP_PROTOCOL_VERSION,
 };
 use flash_store::{FlashStore, OptionsBuilder};
@@ -524,4 +525,181 @@ fn test_log_level_formatting() {
     assert_eq!(format!("{}", McpLogLevel::Info), "info");
     assert_eq!(format!("{}", McpLogLevel::Warning), "warning");
     assert_eq!(format!("{}", McpLogLevel::Error), "error");
+}
+
+#[test]
+fn test_mcp_prompt_definitions_and_registry() {
+    let registry = McpPromptRegistry::with_standard_prompts();
+    assert_eq!(registry.count(), 3);
+    assert!(registry.contains("flash_troubleshoot"));
+    assert!(registry.contains("flash_rag_synthesize"));
+    assert!(registry.contains("flash_agent_orchestrate"));
+
+    let list = registry.list();
+    assert_eq!(list.len(), 3);
+
+    // Test flash_troubleshoot render
+    let mut args = std::collections::HashMap::new();
+    args.insert("issue".to_string(), "compaction stall on L0".to_string());
+    args.insert("component".to_string(), "compaction".to_string());
+
+    let res = registry.render("flash_troubleshoot", Some(&args)).unwrap();
+    assert!(res.description.is_some());
+    assert_eq!(res.messages.len(), 1);
+    assert_eq!(res.messages[0].role, "user");
+    let text = res.messages[0].content.as_text().unwrap();
+    assert!(text.contains("compaction stall on L0"));
+    assert!(text.contains("Component: compaction"));
+
+    // Test flash_rag_synthesize render
+    let mut rag_args = std::collections::HashMap::new();
+    rag_args.insert("query".to_string(), "What is LSM tree?".to_string());
+    rag_args.insert("context".to_string(), "LSM trees optimize write throughput.".to_string());
+
+    let rag_res = registry.render("flash_rag_synthesize", Some(&rag_args)).unwrap();
+    let rag_text = rag_res.messages[0].content.as_text().unwrap();
+    assert!(rag_text.contains("What is LSM tree?"));
+    assert!(rag_text.contains("LSM trees optimize write throughput."));
+
+    // Test flash_agent_orchestrate render
+    let mut agent_args = std::collections::HashMap::new();
+    agent_args.insert("goal".to_string(), "Deploy distributed cluster".to_string());
+
+    let agent_res = registry.render("flash_agent_orchestrate", Some(&agent_args)).unwrap();
+    let agent_text = agent_res.messages[0].content.as_text().unwrap();
+    assert!(agent_text.contains("Deploy distributed cluster"));
+}
+
+#[test]
+fn test_mcp_server_prompts_and_logging_rpc() {
+    let config = McpServerConfigBuilder::new().build();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+    let server = McpServer::with_store(config, store);
+
+    // 1. prompts/list
+    let list_req = JsonRpcRequest::new(201, "prompts/list", None);
+    let list_resp = server.handle_request(list_req);
+    assert!(list_resp.error.is_none());
+    let res_val = list_resp.result.unwrap();
+    let prompts_arr = res_val.get("prompts").unwrap().as_array().unwrap();
+    assert_eq!(prompts_arr.len(), 3);
+
+    // 2. prompts/get
+    let get_req = JsonRpcRequest::new(
+        202,
+        "prompts/get",
+        Some(json!({
+            "name": "flash_troubleshoot",
+            "arguments": {
+                "issue": "WAL replay failure",
+                "component": "wal"
+            }
+        })),
+    );
+    let get_resp = server.handle_request(get_req);
+    assert!(get_resp.error.is_none());
+    let get_val = get_resp.result.unwrap();
+    let msgs = get_val.get("messages").unwrap().as_array().unwrap();
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].get("content").unwrap().get("text").unwrap().as_str().unwrap().contains("WAL replay failure"));
+
+    // 3. logging/setLevel
+    let set_lvl_req = JsonRpcRequest::new(
+        203,
+        "logging/setLevel",
+        Some(json!({"level": "debug"})),
+    );
+    let set_lvl_resp = server.handle_request(set_lvl_req);
+    assert!(set_lvl_resp.error.is_none());
+    assert_eq!(server.notifications().min_log_level(), McpLogLevel::Debug);
+}
+
+#[test]
+fn test_mcp_notification_broadcaster() {
+    let broadcaster = McpNotificationBroadcaster::new();
+    let collector = Arc::new(CollectingNotificationObserver::new());
+    broadcaster.add_observer(collector.clone());
+
+    assert_eq!(broadcaster.observer_count(), 1);
+    assert_eq!(broadcaster.min_log_level(), McpLogLevel::Info);
+
+    // Debug message should be suppressed at default Info level
+    broadcaster.log(McpLogLevel::Debug, Some("test"), "Suppressed debug");
+    assert_eq!(collector.len(), 0);
+
+    // Info message should be emitted
+    broadcaster.log(McpLogLevel::Info, Some("test"), "Visible info");
+    assert_eq!(collector.len(), 1);
+
+    // Resource update
+    broadcaster.notify_resource_updated("flash://stats");
+    assert_eq!(collector.len(), 2);
+
+    // Tool list changed
+    broadcaster.notify_tools_changed();
+    assert_eq!(collector.len(), 3);
+
+    // Prompt list changed
+    broadcaster.notify_prompts_changed();
+    assert_eq!(collector.len(), 4);
+    assert_eq!(broadcaster.total_broadcasts(), 4);
+
+    let notifs = collector.notifications();
+    assert_eq!(notifs[0].method, "notifications/message");
+    assert_eq!(notifs[1].method, "notifications/resources/updated");
+    assert_eq!(notifs[2].method, "notifications/tools/list_changed");
+    assert_eq!(notifs[3].method, "notifications/prompts/list_changed");
+}
+
+#[test]
+fn test_mcp_subsystem_builder_and_integration() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    // Setup RAG engine
+    let rag_cfg = flash_store::rag::RagConfigBuilder::new().embedding_dim(16).build();
+    let rag_engine = Arc::new(parking_lot::RwLock::new(flash_store::rag::RagEngine::new(rag_cfg)));
+
+    // Setup Agent engine
+    let agent_engine = Arc::new(parking_lot::RwLock::new(flash_store::agent::AgentEngine::new("swarm-mcp")));
+
+    let config = McpServerConfigBuilder::new().server_name("flash-subsystem").build();
+    let subsystem = McpSubsystem::build(config, store.clone(), Some(rag_engine.clone()), Some(agent_engine.clone()));
+
+    assert!(subsystem.rag_engine().is_some());
+    assert!(subsystem.agent_engine().is_some());
+
+    let server = subsystem.server();
+    // Test tools list contains storage, rag, and agent tools
+    let tools_req = JsonRpcRequest::new(301, "tools/list", None);
+    let tools_resp = server.handle_request(tools_req);
+    assert!(tools_resp.error.is_none());
+    let tools = tools_resp.result.unwrap().get("tools").unwrap().as_array().unwrap().len();
+    assert_eq!(tools, 7); // get, put, delete, scan, stats, rag_query, agent_run
+
+    // Test resources list contains flash:// stats, manifest, rag/stats, rag/config, agent/state, agent/agents
+    let res_req = JsonRpcRequest::new(302, "resources/list", None);
+    let res_resp = server.handle_request(res_req);
+    assert!(res_resp.error.is_none());
+    let resources = res_resp.result.unwrap().get("resources").unwrap().as_array().unwrap().len();
+    assert_eq!(resources, 6);
+
+    // Read rag stats resource
+    let rag_read = server.handle_request(JsonRpcRequest::new(
+        303,
+        "resources/read",
+        Some(json!({"uri": "flash://rag/stats"})),
+    ));
+    assert!(rag_read.error.is_none());
+
+    // Read agent state resource
+    let agent_read = server.handle_request(JsonRpcRequest::new(
+        304,
+        "resources/read",
+        Some(json!({"uri": "flash://agent/state"})),
+    ));
+    assert!(agent_read.error.is_none());
 }
