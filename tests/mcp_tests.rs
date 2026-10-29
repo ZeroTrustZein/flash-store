@@ -16,10 +16,10 @@ use flash_store::error::Result;
 use flash_store::mcp::{
     mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, JsonRpcError,
     JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent, McpLogLevel,
-    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
-    McpServer, McpServerConfig, McpServerConfigBuilder, McpToolDefinition, McpToolHandler,
-    McpToolRegistry, McpToolResult, MockMcpTransport, RequestId, StandardToolSchemas,
-    DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer,
+    McpServerConfig, McpServerConfigBuilder, McpToolDefinition, McpToolHandler, McpToolRegistry,
+    McpToolResult, MockMcpTransport, RequestId, StandardToolSchemas, DEFAULT_SERVER_NAME,
+    DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
 };
 
 #[test]
@@ -76,7 +76,10 @@ fn test_jsonrpc_request_response_serialization() {
         Some("req-102".into()),
         JsonRpcError::method_not_found("unknown/action"),
     );
-    assert_eq!(err_resp.error.as_ref().unwrap().code, mcp_error_codes::METHOD_NOT_FOUND);
+    assert_eq!(
+        err_resp.error.as_ref().unwrap().code,
+        mcp_error_codes::METHOD_NOT_FOUND
+    );
 
     let notif = JsonRpcNotification::new("notifications/message", Some(json!({"level": "info"})));
     assert_eq!(notif.method, "notifications/message");
@@ -96,11 +99,22 @@ fn test_request_id_display_and_equality() {
 fn test_standard_tool_schemas() {
     let get_def = StandardToolSchemas::flash_get();
     assert_eq!(get_def.name, "flash_get");
-    assert!(get_def.input_schema.get("properties").unwrap().get("key").is_some());
+    assert!(get_def
+        .input_schema
+        .get("properties")
+        .unwrap()
+        .get("key")
+        .is_some());
 
     let put_def = StandardToolSchemas::flash_put();
     assert_eq!(put_def.name, "flash_put");
-    assert!(put_def.input_schema.get("required").unwrap().as_array().unwrap().contains(&json!("key")));
+    assert!(put_def
+        .input_schema
+        .get("required")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .contains(&json!("key")));
 
     let scan_def = StandardToolSchemas::flash_scan();
     assert_eq!(scan_def.name, "flash_scan");
@@ -202,7 +216,11 @@ fn test_resource_registry_and_read() {
     let contents = registry.read("flash://stats").expect("Read should succeed");
     assert_eq!(contents.len(), 1);
     assert_eq!(contents[0].uri, "flash://stats");
-    assert!(contents[0].text.as_ref().unwrap().contains("active_memtables"));
+    assert!(contents[0]
+        .text
+        .as_ref()
+        .unwrap()
+        .contains("active_memtables"));
 
     let err = registry.read("flash://invalid_uri");
     assert!(err.is_err());
@@ -294,6 +312,7 @@ fn test_mcp_server_mock_transport_end_to_end() {
     );
 
     // Close transport and join server thread
+    drop(client);
     transport.close();
     server_handle.join().unwrap();
 }

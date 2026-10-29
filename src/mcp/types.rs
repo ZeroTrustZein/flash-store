@@ -150,6 +150,11 @@ impl McpContent {
             mime_type: mime_type.into(),
         }
     }
+
+    /// Creates an embedded resource content item.
+    pub fn resource(resource: Value) -> Self {
+        McpContent::Resource { resource }
+    }
 }
 
 /// Severity level for MCP logging notifications.
@@ -177,6 +182,112 @@ impl std::fmt::Display for McpLogLevel {
             McpLogLevel::Critical => write!(f, "critical"),
             McpLogLevel::Alert => write!(f, "alert"),
             McpLogLevel::Emergency => write!(f, "emergency"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_implementation_creation() {
+        let impl_desc = Implementation::new("test-server", "1.2.3");
+        assert_eq!(impl_desc.name, "test-server");
+        assert_eq!(impl_desc.version, "1.2.3");
+
+        let serialized = serde_json::to_string(&impl_desc).unwrap();
+        let deserialized: Implementation = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, impl_desc);
+    }
+
+    #[test]
+    fn test_server_capabilities_serialization() {
+        let mut caps = ServerCapabilities::default();
+        caps.tools = Some(ToolsCapability {
+            list_changed: Some(true),
+        });
+        caps.resources = Some(ResourcesCapability {
+            subscribe: Some(true),
+            list_changed: Some(false),
+        });
+        caps.prompts = Some(PromptsCapability {
+            list_changed: Some(true),
+        });
+        caps.logging = Some(LoggingCapability {});
+
+        let val = serde_json::to_value(&caps).unwrap();
+        assert!(val.get("tools").is_some());
+        assert_eq!(val["tools"]["listChanged"], true);
+        assert_eq!(val["resources"]["subscribe"], true);
+        assert_eq!(val["resources"]["listChanged"], false);
+        assert!(val.get("logging").is_some());
+
+        let roundtrip: ServerCapabilities = serde_json::from_value(val).unwrap();
+        assert_eq!(roundtrip, caps);
+    }
+
+    #[test]
+    fn test_initialize_roundtrip() {
+        let params = InitializeParams {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation::new("test-client", "0.1.0"),
+        };
+        let params_val = serde_json::to_value(&params).unwrap();
+        assert_eq!(params_val["protocolVersion"], "2024-11-05");
+        assert_eq!(params_val["clientInfo"]["name"], "test-client");
+
+        let res = InitializeResult {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ServerCapabilities::default(),
+            server_info: Implementation::new("flash-server", "1.0.0"),
+            instructions: Some("Do not panic".to_string()),
+        };
+        let res_val = serde_json::to_value(&res).unwrap();
+        assert_eq!(res_val["serverInfo"]["version"], "1.0.0");
+        assert_eq!(res_val["instructions"], "Do not panic");
+    }
+
+    #[test]
+    fn test_mcp_content_variants() {
+        let txt = McpContent::text("hello world");
+        let txt_val = serde_json::to_value(&txt).unwrap();
+        assert_eq!(txt_val["type"], "text");
+        assert_eq!(txt_val["text"], "hello world");
+
+        let img = McpContent::image("aW1hZ2U=", "image/png");
+        let img_val = serde_json::to_value(&img).unwrap();
+        assert_eq!(img_val["type"], "image");
+        assert_eq!(img_val["data"], "aW1hZ2U=");
+        assert_eq!(img_val["mimeType"], "image/png");
+
+        let res = McpContent::resource(json!({"uri": "flash://doc"}));
+        let res_val = serde_json::to_value(&res).unwrap();
+        assert_eq!(res_val["type"], "resource");
+        assert_eq!(res_val["resource"]["uri"], "flash://doc");
+    }
+
+    #[test]
+    fn test_log_levels_display_and_serde() {
+        let levels = vec![
+            (McpLogLevel::Debug, "debug"),
+            (McpLogLevel::Info, "info"),
+            (McpLogLevel::Notice, "notice"),
+            (McpLogLevel::Warning, "warning"),
+            (McpLogLevel::Error, "error"),
+            (McpLogLevel::Critical, "critical"),
+            (McpLogLevel::Alert, "alert"),
+            (McpLogLevel::Emergency, "emergency"),
+        ];
+
+        for (lvl, expected_str) in levels {
+            assert_eq!(lvl.to_string(), expected_str);
+            let ser = serde_json::to_string(&lvl).unwrap();
+            assert_eq!(ser, format!("\"{}\"", expected_str));
+            let de: McpLogLevel = serde_json::from_str(&ser).unwrap();
+            assert_eq!(de, lvl);
         }
     }
 }

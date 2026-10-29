@@ -41,9 +41,9 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> McpTransport for Stdio
         let mut line = String::new();
         let bytes_read = {
             let mut reader = self.reader.lock();
-            reader.read_line(&mut line).map_err(|e| {
-                FlashStoreError::Io(e)
-            })?
+            reader
+                .read_line(&mut line)
+                .map_err(|e| FlashStoreError::Io(e))?
         };
 
         if bytes_read == 0 {
@@ -64,7 +64,9 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> McpTransport for Stdio
         let serialized = serde_json::to_string(response)?;
 
         let mut writer = self.writer.lock();
-        writer.write_all(serialized.as_bytes()).map_err(FlashStoreError::Io)?;
+        writer
+            .write_all(serialized.as_bytes())
+            .map_err(FlashStoreError::Io)?;
         writer.write_all(b"\n").map_err(FlashStoreError::Io)?;
         writer.flush().map_err(FlashStoreError::Io)?;
 
@@ -91,10 +93,7 @@ impl MockMcpTransport {
             is_closed: AtomicBool::new(false),
         });
 
-        let client_side = MockMcpClientSide {
-            req_tx,
-            resp_rx,
-        };
+        let client_side = MockMcpClientSide { req_tx, resp_rx };
 
         (client_side, server_transport)
     }
@@ -111,7 +110,10 @@ impl McpTransport for MockMcpTransport {
             if self.is_closed.load(Ordering::SeqCst) {
                 return Ok(None);
             }
-            match self.req_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            match self
+                .req_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+            {
                 Ok(req) => return Ok(Some(req)),
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     continue;
@@ -137,15 +139,15 @@ pub struct MockMcpClientSide {
 impl MockMcpClientSide {
     /// Sends a JSON-RPC request to the mock server.
     pub fn send_request(&self, req: JsonRpcRequest) -> Result<()> {
-        self.req_tx.send(req).map_err(|e| {
-            FlashStoreError::Mcp(format!("Mock send failure: {}", e))
-        })
+        self.req_tx
+            .send(req)
+            .map_err(|e| FlashStoreError::Mcp(format!("Mock send failure: {}", e)))
     }
 
     /// Receives a response from the mock server.
     pub fn receive_response(&self) -> Result<JsonRpcResponse> {
-        self.resp_rx.recv().map_err(|e| {
-            FlashStoreError::Mcp(format!("Mock recv failure: {}", e))
-        })
+        self.resp_rx
+            .recv()
+            .map_err(|e| FlashStoreError::Mcp(format!("Mock recv failure: {}", e)))
     }
 }

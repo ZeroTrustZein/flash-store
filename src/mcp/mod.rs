@@ -32,6 +32,7 @@ pub use tools::{
 };
 pub use transport::{McpTransport, MockMcpClientSide, MockMcpTransport, StdioTransport};
 pub use types::{
-    ClientCapabilities, Implementation, InitializeParams, InitializeResult, McpContent,
-    McpLogLevel, ServerCapabilities, ToolsCapability,
+    ClientCapabilities, Implementation, InitializeParams, InitializeResult, LoggingCapability,
+    McpContent, McpLogLevel, PromptsCapability, ResourcesCapability, ServerCapabilities,
+    ToolsCapability,
 };

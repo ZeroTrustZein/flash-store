@@ -61,7 +61,11 @@ pub struct McpResourceContent {
 
 impl McpResourceContent {
     /// Constructs a text-based resource content object.
-    pub fn text(uri: impl Into<String>, mime_type: impl Into<String>, text: impl Into<String>) -> Self {
+    pub fn text(
+        uri: impl Into<String>,
+        mime_type: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
         Self {
             uri: uri.into(),
             mime_type: Some(mime_type.into()),
@@ -71,7 +75,11 @@ impl McpResourceContent {
     }
 
     /// Constructs a binary blob resource content object.
-    pub fn blob(uri: impl Into<String>, mime_type: impl Into<String>, blob: impl Into<String>) -> Self {
+    pub fn blob(
+        uri: impl Into<String>,
+        mime_type: impl Into<String>,
+        blob: impl Into<String>,
+    ) -> Self {
         Self {
             uri: uri.into(),
             mime_type: Some(mime_type.into()),

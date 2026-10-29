@@ -149,13 +149,14 @@ pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
 pub use mcp::{
     mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
-    JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent,
-    McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
-    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
-    McpServer, McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition,
-    McpToolHandler, McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide,
-    MockMcpTransport, RequestId, ServerCapabilities, StandardToolSchemas, StdioTransport,
-    ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+    JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability,
+    McpContent, McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
+    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer,
+    McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition, McpToolHandler,
+    McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide, MockMcpTransport,
+    PromptsCapability, RequestId, ResourcesCapability, ServerCapabilities, StandardToolSchemas,
+    StdioTransport, ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
+    MCP_PROTOCOL_VERSION,
 };
 pub use rag::{
     borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,
@@ -214,13 +215,14 @@ pub mod prelude {
     };
     pub use crate::mcp::{
         mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
-        JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent,
-        McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
+        JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability,
+        McpContent, McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
         McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
         McpServer, McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition,
         McpToolHandler, McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide,
-        MockMcpTransport, RequestId, ServerCapabilities, StandardToolSchemas, StdioTransport,
-        ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+        MockMcpTransport, PromptsCapability, RequestId, ResourcesCapability, ServerCapabilities,
+        StandardToolSchemas, StdioTransport, ToolsCapability, DEFAULT_SERVER_NAME,
+        DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
     };
     pub use crate::rag::{
         borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,

@@ -10,9 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::error::{FlashStoreError, Result};
 use crate::mcp::config::McpServerConfig;
-use crate::mcp::protocol::{
-    error_codes, JsonRpcError, JsonRpcRequest, JsonRpcResponse, RequestId,
-};
+use crate::mcp::protocol::{error_codes, JsonRpcError, JsonRpcRequest, JsonRpcResponse, RequestId};
 use crate::mcp::resources::{McpListResourcesResult, McpReadResourceResult, McpResourceRegistry};
 use crate::mcp::tools::{McpListToolsResult, McpToolCallParams, McpToolRegistry};
 use crate::mcp::transport::McpTransport;
@@ -71,9 +69,7 @@ impl McpServer {
                 // Client confirmed initialization; no response needed for notifications
                 JsonRpcResponse::success(id, json!({}))
             }
-            unknown => {
-                JsonRpcResponse::error(Some(id), JsonRpcError::method_not_found(unknown))
-            }
+            unknown => JsonRpcResponse::error(Some(id), JsonRpcError::method_not_found(unknown)),
         }
     }
 
@@ -84,7 +80,10 @@ impl McpServer {
                 Err(e) => {
                     return JsonRpcResponse::error(
                         Some(id),
-                        JsonRpcError::invalid_params(format!("Failed parsing initialize params: {}", e)),
+                        JsonRpcError::invalid_params(format!(
+                            "Failed parsing initialize params: {}",
+                            e
+                        )),
                     );
                 }
             },
@@ -105,7 +104,9 @@ impl McpServer {
 
         let capabilities = ServerCapabilities {
             tools: if self.config.enable_tools {
-                Some(ToolsCapability { list_changed: Some(true) })
+                Some(ToolsCapability {
+                    list_changed: Some(true),
+                })
             } else {
                 None
             },
@@ -118,7 +119,9 @@ impl McpServer {
                 None
             },
             prompts: if self.config.enable_prompts {
-                Some(PromptsCapability { list_changed: Some(false) })
+                Some(PromptsCapability {
+                    list_changed: Some(false),
+                })
             } else {
                 None
             },
@@ -156,7 +159,11 @@ impl McpServer {
         if !self.config.enable_tools {
             return JsonRpcResponse::error(
                 Some(id),
-                JsonRpcError::new(error_codes::SERVER_ERROR_START, "Tools capability is disabled", None),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Tools capability is disabled",
+                    None,
+                ),
             );
         }
 
@@ -179,7 +186,11 @@ impl McpServer {
         if !self.config.enable_tools {
             return JsonRpcResponse::error(
                 Some(id),
-                JsonRpcError::new(error_codes::SERVER_ERROR_START, "Tools capability is disabled", None),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Tools capability is disabled",
+                    None,
+                ),
             );
         }
 
@@ -189,7 +200,10 @@ impl McpServer {
                 Err(e) => {
                     return JsonRpcResponse::error(
                         Some(id),
-                        JsonRpcError::invalid_params(format!("Invalid tools/call parameters: {}", e)),
+                        JsonRpcError::invalid_params(format!(
+                            "Invalid tools/call parameters: {}",
+                            e
+                        )),
                     );
                 }
             },
@@ -223,7 +237,11 @@ impl McpServer {
         if !self.config.enable_resources {
             return JsonRpcResponse::error(
                 Some(id),
-                JsonRpcError::new(error_codes::SERVER_ERROR_START, "Resources capability is disabled", None),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Resources capability is disabled",
+                    None,
+                ),
             );
         }
 
@@ -246,11 +264,16 @@ impl McpServer {
         if !self.config.enable_resources {
             return JsonRpcResponse::error(
                 Some(id),
-                JsonRpcError::new(error_codes::SERVER_ERROR_START, "Resources capability is disabled", None),
+                JsonRpcError::new(
+                    error_codes::SERVER_ERROR_START,
+                    "Resources capability is disabled",
+                    None,
+                ),
             );
         }
 
-        let uri = match params.and_then(|p| p.get("uri").and_then(|u| u.as_str().map(String::from))) {
+        let uri = match params.and_then(|p| p.get("uri").and_then(|u| u.as_str().map(String::from)))
+        {
             Some(u) => u,
             None => {
                 return JsonRpcResponse::error(
@@ -273,7 +296,11 @@ impl McpServer {
             }
             Err(err) => JsonRpcResponse::error(
                 Some(id),
-                JsonRpcError::new(error_codes::INVALID_PARAMS, format!("Resource read error: {}", err), None),
+                JsonRpcError::new(
+                    error_codes::INVALID_PARAMS,
+                    format!("Resource read error: {}", err),
+                    None,
+                ),
             ),
         }
     }
@@ -294,7 +321,9 @@ impl McpServer {
                     debug!("Transport stream closed (EOF). Terminating server loop.");
                     break;
                 }
-                Err(FlashStoreError::Io(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                Err(FlashStoreError::Io(ref e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
                     break;
                 }
                 Err(e) => {

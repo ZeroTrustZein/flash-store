@@ -28,7 +28,11 @@ pub struct McpToolDefinition {
 
 impl McpToolDefinition {
     /// Creates a new tool definition with a JSON schema.
-    pub fn new(name: impl Into<String>, description: impl Into<String>, input_schema: Value) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
         Self {
             name: name.into(),
             description: Some(description.into()),

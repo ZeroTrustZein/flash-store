@@ -134,12 +134,20 @@ impl JsonRpcError {
 
     /// Predefined parse error (-32700).
     pub fn parse_error(details: impl Into<String>) -> Self {
-        Self::new(error_codes::PARSE_ERROR, "Parse error", Some(Value::String(details.into())))
+        Self::new(
+            error_codes::PARSE_ERROR,
+            "Parse error",
+            Some(Value::String(details.into())),
+        )
     }
 
     /// Predefined invalid request error (-32600).
     pub fn invalid_request(details: impl Into<String>) -> Self {
-        Self::new(error_codes::INVALID_REQUEST, "Invalid Request", Some(Value::String(details.into())))
+        Self::new(
+            error_codes::INVALID_REQUEST,
+            "Invalid Request",
+            Some(Value::String(details.into())),
+        )
     }
 
     /// Predefined method not found error (-32601).
@@ -153,12 +161,20 @@ impl JsonRpcError {
 
     /// Predefined invalid params error (-32602).
     pub fn invalid_params(details: impl Into<String>) -> Self {
-        Self::new(error_codes::INVALID_PARAMS, "Invalid params", Some(Value::String(details.into())))
+        Self::new(
+            error_codes::INVALID_PARAMS,
+            "Invalid params",
+            Some(Value::String(details.into())),
+        )
     }
 
     /// Predefined internal error (-32603).
     pub fn internal_error(details: impl Into<String>) -> Self {
-        Self::new(error_codes::INTERNAL_ERROR, "Internal error", Some(Value::String(details.into())))
+        Self::new(
+            error_codes::INTERNAL_ERROR,
+            "Internal error",
+            Some(Value::String(details.into())),
+        )
     }
 }
 
