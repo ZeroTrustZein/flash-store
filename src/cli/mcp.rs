@@ -4,6 +4,7 @@
 //! serving over stdio, inspecting and executing tools, querying resources, rendering prompt
 //! templates, inspecting server info, and executing raw JSON-RPC 2.0 requests.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -13,8 +14,7 @@ use clap::Subcommand;
 use parking_lot::RwLock;
 use serde_json::Value;
 
-use crate::agent::AgentPipeline;
-use crate::cli::agent::seed_standard_agents;
+use crate::agent::{AgentCapability, AgentDefinition, AgentEngine, AgentRole};
 use crate::cli::formatter;
 use crate::cli::{open_db, GlobalOpts, OutputFormat};
 use crate::error::{FlashStoreError, Result};
@@ -137,6 +137,55 @@ pub enum McpCmd {
     },
 }
 
+/// Helper function to seed standard agents into an AgentEngine.
+pub fn seed_standard_agents_in_engine(engine: &mut AgentEngine) {
+    if !engine.state().active_agents.is_empty() {
+        return;
+    }
+
+    let planner = AgentDefinition::builder("planner", AgentRole::Planner)
+        .name("Swarm Planner")
+        .capability(AgentCapability::TextGeneration)
+        .capability(AgentCapability::Reflection)
+        .system_prompt("Analyze objectives and generate step-by-step execution plans.")
+        .build();
+
+    let coder = AgentDefinition::builder("coder", AgentRole::Coder)
+        .name("Code Synthesis Specialist")
+        .capability(AgentCapability::CodeExecution)
+        .capability(AgentCapability::ToolCalling)
+        .capability(AgentCapability::TextGeneration)
+        .system_prompt("Synthesize correct, robust, and clean code.")
+        .build();
+
+    let executor = AgentDefinition::builder("executor", AgentRole::ToolExecutor)
+        .name("Tool Execution Worker")
+        .capability(AgentCapability::ToolCalling)
+        .capability(AgentCapability::StorageOps)
+        .system_prompt("Execute deterministic tools and storage operations.")
+        .build();
+
+    let critic = AgentDefinition::builder("critic", AgentRole::Critic)
+        .name("Verification & Reflection Critic")
+        .capability(AgentCapability::Reflection)
+        .capability(AgentCapability::TextGeneration)
+        .system_prompt("Critique task execution results and enforce invariants.")
+        .build();
+
+    let memory = AgentDefinition::builder("memory", AgentRole::MemoryAgent)
+        .name("Episodic Memory Specialist")
+        .capability(AgentCapability::MemoryRetrieval)
+        .capability(AgentCapability::StorageOps)
+        .system_prompt("Store and retrieve episodic memories.")
+        .build();
+
+    engine.register_agent(planner);
+    engine.register_agent(coder);
+    engine.register_agent(executor);
+    engine.register_agent(critic);
+    engine.register_agent(memory);
+}
+
 /// Open an initialized `McpSubsystem` backed by persistent `FlashStore`, RAG, and Agent engines.
 pub fn open_mcp_subsystem(opts: &GlobalOpts) -> Result<McpSubsystem> {
     let db = Arc::new(open_db(opts)?);
@@ -150,17 +199,11 @@ pub fn open_mcp_subsystem(opts: &GlobalOpts) -> Result<McpSubsystem> {
         }
     };
 
-    // Attempt to restore or seed agent pipeline
+    // Attempt to initialize Agent engine with persistent store
     let agent_engine = {
-        let workflow_id = "default";
-        match AgentPipeline::restore_from_store(db.clone(), workflow_id) {
-            Ok(pipeline) => Some(pipeline.engine().clone()),
-            Err(_) => {
-                let mut pipeline = AgentPipeline::new(workflow_id).with_store(db.clone());
-                let _ = seed_standard_agents(&mut pipeline);
-                Some(pipeline.engine().clone())
-            }
-        }
+        let mut engine = AgentEngine::new("default").with_store(db.clone());
+        seed_standard_agents_in_engine(&mut engine);
+        Some(Arc::new(RwLock::new(engine)))
     };
 
     let config = McpServerConfigBuilder::new()
@@ -207,6 +250,31 @@ pub fn parse_json_args(raw: Option<String>, file: Option<PathBuf>) -> Result<Val
     }
 }
 
+/// Convert a `serde_json::Value` into `Option<HashMap<String, String>>`.
+pub fn value_to_string_map(val: Value) -> Option<HashMap<String, String>> {
+    match val {
+        Value::Object(map) => {
+            let mut res = HashMap::new();
+            for (k, v) in map {
+                match v {
+                    Value::String(s) => {
+                        res.insert(k, s);
+                    }
+                    other => {
+                        res.insert(k, other.to_string());
+                    }
+                }
+            }
+            if res.is_empty() {
+                None
+            } else {
+                Some(res)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Execute an MCP subcommand with global options.
 pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
     match cmd {
@@ -222,9 +290,9 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
                 RagEngine::recover(config, db.clone()).ok().map(|e| Arc::new(RwLock::new(e)))
             };
             let agent_engine = {
-                let mut pipeline = AgentPipeline::new("mcp_server").with_store(db.clone());
-                let _ = seed_standard_agents(&mut pipeline);
-                Some(pipeline.engine().clone())
+                let mut engine = AgentEngine::new("mcp_server").with_store(db.clone());
+                seed_standard_agents_in_engine(&mut engine);
+                Some(Arc::new(RwLock::new(engine)))
             };
 
             let config = McpServerConfigBuilder::new()
@@ -244,7 +312,7 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
         McpCmd::Tools { format } => {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
-            let tools = subsystem.server().tools().list_tools();
+            let tools = subsystem.server().tools().list();
             formatter::format_mcp_tools(&tools, fmt);
             Ok(())
         }
@@ -272,7 +340,7 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
         McpCmd::Resources { format } => {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
-            let resources = subsystem.server().resources().list_resources();
+            let resources = subsystem.server().resources().list();
             formatter::format_mcp_resources(&resources, fmt);
             Ok(())
         }
@@ -280,7 +348,7 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
         McpCmd::Read { uri, format } => {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
-            let contents = subsystem.server().resources().read_resource(&uri)?;
+            let contents = subsystem.server().resources().read(&uri)?;
             formatter::format_mcp_resource_contents(&contents, fmt);
             Ok(())
         }
@@ -288,7 +356,7 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
         McpCmd::Prompts { format } => {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
-            let prompts = subsystem.server().prompts().list_prompts();
+            let prompts = subsystem.server().prompts().list();
             formatter::format_mcp_prompts(&prompts, fmt);
             Ok(())
         }
@@ -297,20 +365,17 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
             let arguments = parse_json_args(args, None)?;
+            let arg_map = value_to_string_map(arguments);
 
             let params = McpGetPromptParams {
                 name: name.clone(),
-                arguments: if arguments.as_object().map(|o| o.is_empty()).unwrap_or(true) {
-                    None
-                } else {
-                    Some(arguments)
-                },
+                arguments: arg_map,
             };
 
             let res = subsystem
                 .server()
                 .prompts()
-                .get_prompt(&params.name, params.arguments)?;
+                .render(&params.name, params.arguments.as_ref())?;
             formatter::format_mcp_prompt_result(&res, fmt);
             Ok(())
         }
@@ -319,9 +384,9 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
             let subsystem = open_mcp_subsystem(opts)?;
             let fmt = parse_output_format(&format, opts.json);
 
-            let tools_count = subsystem.server().tools().list_tools().len();
-            let resources_count = subsystem.server().resources().list_resources().len();
-            let prompts_count = subsystem.server().prompts().list_prompts().len();
+            let tools_count = subsystem.server().tools().list().len();
+            let resources_count = subsystem.server().resources().list().len();
+            let prompts_count = subsystem.server().prompts().list().len();
 
             let info = serde_json::json!({
                 "server_name": DEFAULT_SERVER_NAME,
@@ -395,6 +460,9 @@ mod tests {
         let parsed = parse_json_args(Some(r#"{"key": "test_val"}"#.into()), None).unwrap();
         assert_eq!(parsed["key"], "test_val");
 
+        let map = value_to_string_map(parsed).unwrap();
+        assert_eq!(map.get("key").unwrap(), "test_val");
+
         let err = parse_json_args(Some("not json".into()), None);
         assert!(err.is_err());
 
@@ -414,18 +482,18 @@ mod tests {
         };
 
         let subsystem = open_mcp_subsystem(&opts)?;
-        let tools = subsystem.server().tools().list_tools();
+        let tools = subsystem.server().tools().list();
         assert!(!tools.is_empty());
         assert!(tools.iter().any(|t| t.name == "flash_put"));
         assert!(tools.iter().any(|t| t.name == "flash_get"));
         assert!(tools.iter().any(|t| t.name == "flash_rag_query"));
 
-        let resources = subsystem.server().resources().list_resources();
+        let resources = subsystem.server().resources().list();
         assert!(!resources.is_empty());
 
-        let prompts = subsystem.server().prompts().list_prompts();
+        let prompts = subsystem.server().prompts().list();
         assert!(!prompts.is_empty());
-        assert!(prompts.iter().any(|p| p.name == "troubleshoot_lsm"));
+        assert!(prompts.iter().any(|p| p.name == "flash_troubleshoot"));
 
         Ok(())
     }

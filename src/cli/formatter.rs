@@ -953,7 +953,12 @@ pub fn format_mcp_tools(tools: &[McpToolDefinition], format: OutputFormat) {
             println!("name\tdescription\thas_input_schema");
             for t in tools {
                 let has_schema = !t.input_schema.is_null();
-                println!("{}\t{}\t{}", t.name, t.description, has_schema);
+                println!(
+                    "{}\t{}\t{}",
+                    t.name,
+                    t.description.as_deref().unwrap_or("-"),
+                    has_schema
+                );
             }
         }
         OutputFormat::Text => {
@@ -964,7 +969,9 @@ pub fn format_mcp_tools(tools: &[McpToolDefinition], format: OutputFormat) {
             println!("=== Registered MCP Tools ({}) ===", tools.len());
             for (i, t) in tools.iter().enumerate() {
                 println!("{}) Tool: '{}'", i + 1, t.name);
-                println!("   Description: {}", t.description);
+                if let Some(desc) = &t.description {
+                    println!("   Description: {}", desc);
+                }
                 if !t.input_schema.is_null() {
                     let schema_str = serde_json::to_string(&t.input_schema).unwrap_or_default();
                     println!("   Input Schema: {}", safe_truncate_str(&schema_str, 80));
@@ -1492,7 +1499,7 @@ mod tests {
         format_mcp_tools(&tools, OutputFormat::Text);
         format_mcp_tools(&[], OutputFormat::Text);
 
-        let result = McpToolResult::success(vec![McpContent::text("val1")]);
+        let result = McpToolResult::success("val1");
         format_mcp_tool_result(&result, OutputFormat::Json);
         format_mcp_tool_result(&result, OutputFormat::Tsv);
         format_mcp_tool_result(&result, OutputFormat::Text);
@@ -1521,8 +1528,11 @@ mod tests {
         format_mcp_resource_contents(&contents, OutputFormat::Text);
         format_mcp_resource_contents(&[], OutputFormat::Text);
 
-        let prompt = McpPromptDefinition::new("troubleshoot_lsm", "Troubleshoot LSM tree")
-            .with_argument(McpPromptArgument::required("error_message", "Error text"));
+        let prompt = McpPromptDefinition::new(
+            "troubleshoot_lsm",
+            "Troubleshoot LSM tree",
+            Some(vec![McpPromptArgument::required("error_message", "Error text")]),
+        );
         format_mcp_prompts(&[prompt], OutputFormat::Json);
         format_mcp_prompts(&[], OutputFormat::Text);
 

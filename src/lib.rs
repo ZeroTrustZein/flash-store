@@ -140,7 +140,8 @@ pub use agent::{
 pub use batch::WriteBatch;
 pub use cache::{BlockCache, LruBlockCache};
 pub use cli::{
-    open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+    open_agent_pipeline, open_mcp_subsystem, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, McpCmd,
+    OutputFormat, RagCmd,
 };
 pub use compaction::{CompactionTask, Compactor};
 pub use config::{Options, OptionsBuilder};
@@ -211,7 +212,8 @@ pub mod prelude {
     pub use crate::batch::WriteBatch;
     pub use crate::cache::{BlockCache, LruBlockCache};
     pub use crate::cli::{
-        open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+        open_agent_pipeline, open_mcp_subsystem, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts,
+        McpCmd, OutputFormat, RagCmd,
     };
     pub use crate::compaction::{CompactionTask, Compactor};
     pub use crate::config::{Options, OptionsBuilder};

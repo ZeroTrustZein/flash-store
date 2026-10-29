@@ -805,13 +805,9 @@ pub fn execute_mcp_repl(
             .map(|e| Arc::new(parking_lot::RwLock::new(e)))
     };
     let agent_engine = {
-        let workflow_id = "repl_agent_session";
-        let mut pipeline = match AgentPipeline::restore_from_store(arc_db.clone(), workflow_id) {
-            Ok(p) => p,
-            Err(_) => AgentPipeline::new(workflow_id).with_store(arc_db.clone()),
-        };
-        let _ = seed_standard_agents(&mut pipeline);
-        Some(pipeline.engine().clone())
+        let mut engine = crate::agent::AgentEngine::new("repl_agent_session").with_store(arc_db.clone());
+        crate::cli::mcp::seed_standard_agents_in_engine(&mut engine);
+        Some(Arc::new(parking_lot::RwLock::new(engine)))
     };
 
     let config = McpServerConfigBuilder::new()
@@ -822,10 +818,15 @@ pub fn execute_mcp_repl(
 
     match subcmd.as_str() {
         "TOOLS" | "LIST-TOOLS" => {
-            let tools = subsystem.server().tools().list_tools();
+            let tools = subsystem.server().tools().list();
             let mut out = format!("=== MCP Tools ({}) ===\n", tools.len());
             for (i, t) in tools.iter().enumerate() {
-                out.push_str(&format!("{}. {}\n   {}\n", i + 1, t.name, t.description));
+                out.push_str(&format!(
+                    "{}. {}\n   {}\n",
+                    i + 1,
+                    t.name,
+                    t.description.as_deref().unwrap_or("-")
+                ));
             }
             out.push_str(&format!("({:?})", start_time.elapsed()));
             Ok(Some(out))
@@ -870,7 +871,7 @@ pub fn execute_mcp_repl(
             Ok(Some(out))
         }
         "RESOURCES" | "LIST-RESOURCES" => {
-            let resources = subsystem.server().resources().list_resources();
+            let resources = subsystem.server().resources().list();
             let mut out = format!("=== MCP Resources ({}) ===\n", resources.len());
             for (i, r) in resources.iter().enumerate() {
                 out.push_str(&format!(
@@ -891,7 +892,7 @@ pub fn execute_mcp_repl(
                 ));
             }
             let uri = &sub_args[0];
-            let contents = subsystem.server().resources().read_resource(uri)?;
+            let contents = subsystem.server().resources().read(uri)?;
             let mut out = format!("=== MCP Resource [{}] ===\n", uri);
             for c in contents {
                 if let Some(txt) = c.text {
@@ -904,7 +905,7 @@ pub fn execute_mcp_repl(
             Ok(Some(out))
         }
         "PROMPTS" | "LIST-PROMPTS" => {
-            let prompts = subsystem.server().prompts().list_prompts();
+            let prompts = subsystem.server().prompts().list();
             let mut out = format!("=== MCP Prompt Templates ({}) ===\n", prompts.len());
             for (i, p) in prompts.iter().enumerate() {
                 out.push_str(&format!("{}. {}\n", i + 1, p.name));
@@ -930,10 +931,11 @@ pub fn execute_mcp_repl(
             let parsed_args: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
                 FlashStoreError::InvalidArgument(format!("Invalid JSON arguments: {}", e))
             })?;
+            let map = crate::cli::mcp::value_to_string_map(parsed_args);
             let res = subsystem
                 .server()
                 .prompts()
-                .get_prompt(prompt_name, Some(parsed_args))?;
+                .render(prompt_name, map.as_ref())?;
             let mut out = format!("=== MCP Prompt [{}] ===\n", prompt_name);
             for m in res.messages {
                 match m.content {
@@ -947,9 +949,9 @@ pub fn execute_mcp_repl(
             Ok(Some(out))
         }
         "INFO" | "STATUS" | "PING" => {
-            let tools_count = subsystem.server().tools().list_tools().len();
-            let resources_count = subsystem.server().resources().list_resources().len();
-            let prompts_count = subsystem.server().prompts().list_prompts().len();
+            let tools_count = subsystem.server().tools().list().len();
+            let resources_count = subsystem.server().resources().list().len();
+            let prompts_count = subsystem.server().prompts().list().len();
 
             let out = format!(
                 "=== FlashStore MCP Server ===\nServer:    {} (v{})\nProtocol:  {}\nTools:     {}\nResources: {}\nPrompts:   {}\n({:?})",
@@ -1202,6 +1204,54 @@ mod tests {
 
         let agent_cp = execute_repl_command(&db, &["AGENT".into(), "CHECKPOINT".into()])?;
         assert!(agent_cp.unwrap().contains("OK"));
+
+        // MCP commands
+        let mcp_tools = execute_repl_command(&db, &["MCP".into(), "TOOLS".into()])?;
+        assert!(mcp_tools.unwrap().contains("MCP Tools"));
+
+        let mcp_call = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "CALL".into(),
+                "flash_put".into(),
+                "{\"key\": \"mcp_repl_key\", \"value\": \"mcp_repl_val\"}".into(),
+            ],
+        )?;
+        assert!(mcp_call.unwrap().contains("SUCCESS"));
+
+        let mcp_resources = execute_repl_command(&db, &["MCP".into(), "RESOURCES".into()])?;
+        assert!(mcp_resources.unwrap().contains("MCP Resources"));
+
+        let mcp_read = execute_repl_command(&db, &["MCP".into(), "READ".into(), "flash://stats".into()])?;
+        assert!(mcp_read.unwrap().contains("stats"));
+
+        let mcp_prompts = execute_repl_command(&db, &["MCP".into(), "PROMPTS".into()])?;
+        assert!(mcp_prompts.unwrap().contains("flash_troubleshoot"));
+
+        let mcp_get_prompt = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "GET-PROMPT".into(),
+                "flash_troubleshoot".into(),
+                "{\"issue\": \"bad crc\"}".into(),
+            ],
+        )?;
+        assert!(mcp_get_prompt.unwrap().contains("bad crc"));
+
+        let mcp_info = execute_repl_command(&db, &["MCP".into(), "INFO".into()])?;
+        assert!(mcp_info.unwrap().contains("FlashStore MCP Server"));
+
+        let mcp_req = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "REQ".into(),
+                "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"ping\"}".into(),
+            ],
+        )?;
+        assert!(mcp_req.unwrap().contains("result"));
 
         Ok(())
     }
