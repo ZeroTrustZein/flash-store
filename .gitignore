@@ -8,3 +8,7 @@
 .idea
 .vscode
 *.swp
+.env
+.env.*
+jules-hook-note.txt
+

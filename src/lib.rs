@@ -112,6 +112,7 @@ pub mod engine;
 pub mod error;
 pub mod iterator;
 pub mod manifest;
+pub mod mcp;
 pub mod memtable;
 pub mod rag;
 pub mod sstable;
@@ -146,6 +147,16 @@ pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
+pub use mcp::{
+    mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
+    JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent,
+    McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
+    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
+    McpServer, McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition,
+    McpToolHandler, McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide,
+    MockMcpTransport, RequestId, ServerCapabilities, StandardToolSchemas, StdioTransport,
+    ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+};
 pub use rag::{
     borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,
     euclidean_distance, filter_min_score, maximal_marginal_relevance, reciprocal_rank_fusion,
@@ -200,6 +211,16 @@ pub mod prelude {
     pub use crate::error::{FlashStoreError, Result};
     pub use crate::iterator::{
         MemtableIterator, MergingIterator, SSTableIterator, StorageIterator,
+    };
+    pub use crate::mcp::{
+        mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
+        JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent,
+        McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
+        McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
+        McpServer, McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition,
+        McpToolHandler, McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide,
+        MockMcpTransport, RequestId, ServerCapabilities, StandardToolSchemas, StdioTransport,
+        ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
     };
     pub use crate::rag::{
         borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,

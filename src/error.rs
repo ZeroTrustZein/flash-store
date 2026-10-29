@@ -44,6 +44,9 @@ pub enum FlashStoreError {
     #[error("Reflection error: {0}")]
     Reflection(String),
 
+    #[error("MCP error: {0}")]
+    Mcp(String),
+
     #[error("Other error: {0}")]
     Other(String),
 }
