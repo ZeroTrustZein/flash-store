@@ -9,9 +9,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-use flash_store::mcp::{
-    McpResourceRegistry, McpServer, McpServerConfigBuilder, McpToolRegistry, StdioTransport,
-};
+use flash_store::mcp::{McpServer, McpServerConfigBuilder, StdioTransport};
 
 #[derive(Parser, Debug)]
 #[command(name = "flash-mcp")]
@@ -40,15 +38,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = McpServerConfigBuilder::new()
         .server_name(args.name)
-        .store_path(args.dir)
+        .store_path(&args.dir)
         .enable_tools(!args.disable_tools)
         .enable_resources(!args.disable_resources)
         .build();
 
-    let tools = Arc::new(McpToolRegistry::new());
-    let resources = Arc::new(McpResourceRegistry::new());
+    let store_opts = flash_store::OptionsBuilder::new()
+        .dir(&args.dir)
+        .create_if_missing(true)
+        .build();
+    let store = Arc::new(flash_store::FlashStore::open(store_opts)?);
 
-    let server = McpServer::new(config, tools, resources);
+    let server = McpServer::with_store(config, store);
     let transport = StdioTransport::new(io::stdin(), io::stdout());
 
     server.serve(&transport)?;

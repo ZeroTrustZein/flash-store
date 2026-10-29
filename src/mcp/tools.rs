@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
 use crate::mcp::types::McpContent;
 
@@ -120,6 +121,22 @@ impl McpToolRegistry {
         }
     }
 
+    /// Constructs a tool registry pre-populated with standard FlashStore storage tools.
+    pub fn with_flash_store(store: Arc<FlashStore>) -> Self {
+        let registry = Self::new();
+        registry.register_storage_tools(store);
+        registry
+    }
+
+    /// Registers the standard FlashStore storage tools (`flash_get`, `flash_put`, `flash_delete`, `flash_scan`, `flash_stats`).
+    pub fn register_storage_tools(&self, store: Arc<FlashStore>) {
+        self.register(Arc::new(FlashGetTool::new(store.clone())));
+        self.register(Arc::new(FlashPutTool::new(store.clone())));
+        self.register(Arc::new(FlashDeleteTool::new(store.clone())));
+        self.register(Arc::new(FlashScanTool::new(store.clone())));
+        self.register(Arc::new(FlashStatsTool::new(store)));
+    }
+
     /// Registers a tool handler under its definition name.
     pub fn register(&self, handler: Arc<dyn McpToolHandler>) {
         let name = handler.definition().name;
@@ -158,6 +175,376 @@ impl McpToolRegistry {
     /// Returns the total count of registered tools.
     pub fn count(&self) -> usize {
         self.tools.read().len()
+    }
+}
+
+// ============================================================================
+// Built-in Storage Tool Handlers
+// ============================================================================
+
+/// Tool handler for retrieving values by key via `flash_get`.
+pub struct FlashGetTool {
+    store: Arc<FlashStore>,
+}
+
+impl FlashGetTool {
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpToolHandler for FlashGetTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_get()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let key = arguments
+            .as_ref()
+            .and_then(|a| a.get("key"))
+            .and_then(|k| k.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
+            })?;
+
+        match self.store.get(key)? {
+            Some(bytes) => {
+                let text = String::from_utf8(bytes.to_vec())
+                    .unwrap_or_else(|_| format!("<binary {} bytes>", bytes.len()));
+                let response = json!({
+                    "found": true,
+                    "key": key,
+                    "value": text,
+                });
+                Ok(McpToolResult::success(response.to_string()))
+            }
+            None => {
+                let response = json!({
+                    "found": false,
+                    "key": key,
+                });
+                Ok(McpToolResult::success(response.to_string()))
+            }
+        }
+    }
+}
+
+/// Tool handler for writing key-value pairs via `flash_put`.
+pub struct FlashPutTool {
+    store: Arc<FlashStore>,
+}
+
+impl FlashPutTool {
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpToolHandler for FlashPutTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_put()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let args = arguments.ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required arguments object".into())
+        })?;
+
+        let key = args
+            .get("key")
+            .and_then(|k| k.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
+            })?;
+
+        let value = args
+            .get("value")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'value' argument".into())
+            })?;
+
+        self.store.put(key, value)?;
+
+        let response = json!({
+            "success": true,
+            "key": key,
+            "bytes_written": value.len(),
+        });
+        Ok(McpToolResult::success(response.to_string()))
+    }
+}
+
+/// Tool handler for deleting keys via `flash_delete`.
+pub struct FlashDeleteTool {
+    store: Arc<FlashStore>,
+}
+
+impl FlashDeleteTool {
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpToolHandler for FlashDeleteTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_delete()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let key = arguments
+            .as_ref()
+            .and_then(|a| a.get("key"))
+            .and_then(|k| k.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
+            })?;
+
+        self.store.delete(key)?;
+
+        let response = json!({
+            "success": true,
+            "deleted_key": key,
+        });
+        Ok(McpToolResult::success(response.to_string()))
+    }
+}
+
+/// Tool handler for scanning lexicographical key ranges via `flash_scan`.
+pub struct FlashScanTool {
+    store: Arc<FlashStore>,
+}
+
+impl FlashScanTool {
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpToolHandler for FlashScanTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_scan()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let start_key = arguments
+            .as_ref()
+            .and_then(|a| a.get("start_key"))
+            .and_then(|k| k.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| bytes::Bytes::copy_from_slice(s.as_bytes()));
+
+        let end_key = arguments
+            .as_ref()
+            .and_then(|a| a.get("end_key"))
+            .and_then(|k| k.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| bytes::Bytes::copy_from_slice(s.as_bytes()));
+
+        let limit = arguments
+            .as_ref()
+            .and_then(|a| a.get("limit"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(50) as usize;
+
+        let results = self.store.scan(start_key, end_key)?;
+        let mut items = Vec::new();
+
+        for (k, v) in results.into_iter().take(limit) {
+            let key_str = String::from_utf8_lossy(&k).to_string();
+            let val_str = String::from_utf8_lossy(&v).to_string();
+            items.push(json!({
+                "key": key_str,
+                "value": val_str,
+            }));
+        }
+
+        let response = json!({
+            "count": items.len(),
+            "items": items,
+        });
+        Ok(McpToolResult::success(response.to_string()))
+    }
+}
+
+/// Tool handler for inspecting engine telemetry and stats via `flash_stats`.
+pub struct FlashStatsTool {
+    store: Arc<FlashStore>,
+}
+
+impl FlashStatsTool {
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpToolHandler for FlashStatsTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_stats()
+    }
+
+    fn execute(&self, _arguments: Option<Value>) -> Result<McpToolResult> {
+        let stats = self.store.stats();
+        let response = json!({
+            "active_memtable_size_bytes": stats.active_memtable_size,
+            "immutable_memtables_count": stats.immutable_memtables_count,
+            "levels_file_count": stats.levels_file_count,
+        });
+        Ok(McpToolResult::success(response.to_string()))
+    }
+}
+
+/// Tool handler for executing hybrid dense-sparse vector queries via `flash_rag_query`.
+pub struct FlashRagQueryTool {
+    rag_engine: Option<Arc<RwLock<crate::rag::RagEngine>>>,
+}
+
+impl FlashRagQueryTool {
+    pub fn new(rag_engine: Option<Arc<RwLock<crate::rag::RagEngine>>>) -> Self {
+        Self { rag_engine }
+    }
+}
+
+impl McpToolHandler for FlashRagQueryTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_rag_query()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let args = arguments.ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required arguments object".into())
+        })?;
+
+        let query = args
+            .get("query")
+            .and_then(|q| q.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'query' argument".into())
+            })?;
+
+        let top_k = args
+            .get("top_k")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(5) as usize;
+
+        if let Some(engine) = &self.rag_engine {
+            let mut guard = engine.write();
+            let hits = guard.search(query, None, top_k)?;
+            let results: Vec<Value> = hits
+                .into_iter()
+                .map(|h| {
+                    json!({
+                        "doc_id": h.doc_id,
+                        "score": h.score,
+                        "dense_score": h.dense_score,
+                        "sparse_score": h.sparse_score,
+                    })
+                })
+                .collect();
+
+            let response = json!({
+                "query": query,
+                "count": results.len(),
+                "results": results,
+            });
+            Ok(McpToolResult::success(response.to_string()))
+        } else {
+            let response = json!({
+                "query": query,
+                "count": 0,
+                "results": [],
+                "note": "RAG engine not configured or unattached",
+            });
+            Ok(McpToolResult::success(response.to_string()))
+        }
+    }
+}
+
+/// Tool handler for running agent tasks via `flash_agent_run`.
+pub struct FlashAgentRunTool {
+    agent_engine: Option<Arc<RwLock<crate::agent::AgentEngine>>>,
+}
+
+impl FlashAgentRunTool {
+    pub fn new(agent_engine: Option<Arc<RwLock<crate::agent::AgentEngine>>>) -> Self {
+        Self { agent_engine }
+    }
+}
+
+impl McpToolHandler for FlashAgentRunTool {
+    fn definition(&self) -> McpToolDefinition {
+        StandardToolSchemas::flash_agent_run()
+    }
+
+    fn execute(&self, arguments: Option<Value>) -> Result<McpToolResult> {
+        let args = arguments.ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required arguments object".into())
+        })?;
+
+        let task_id = args
+            .get("task_id")
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'task_id' argument".into())
+            })?;
+
+        let prompt = args
+            .get("prompt")
+            .and_then(|p| p.as_str())
+            .ok_or_else(|| {
+                FlashStoreError::InvalidArgument("Missing required 'prompt' argument".into())
+            })?;
+
+        let priority_str = args
+            .get("priority")
+            .and_then(|p| p.as_str())
+            .unwrap_or("normal");
+
+        let priority = match priority_str.to_lowercase().as_str() {
+            "low" => crate::agent::TaskPriority::Low,
+            "high" => crate::agent::TaskPriority::High,
+            "critical" => crate::agent::TaskPriority::Critical,
+            _ => crate::agent::TaskPriority::Medium,
+        };
+
+        if let Some(engine) = &self.agent_engine {
+            let mut guard = engine.write();
+            let task = crate::agent::AgentTask::builder(task_id, prompt)
+                .priority(priority)
+                .build();
+            guard.submit_task(task, &[])?;
+            let report = guard.execute_task(&crate::agent::TaskId::from(task_id))?;
+
+            let response = json!({
+                "task_id": task_id,
+                "status": "completed",
+                "assigned_agent": report.assigned_agent.as_str(),
+                "verdict": format!("{:?}", report.reflection_verdict),
+                "iterations": report.reflection_iterations,
+            });
+            Ok(McpToolResult::success(response.to_string()))
+        } else {
+            let mut standalone = crate::agent::AgentEngine::new(format!("mcp-{}", task_id));
+            let agent = crate::agent::AgentDefinition::builder("mcp-worker", crate::agent::AgentRole::Coder)
+                .capability(crate::agent::AgentCapability::TextGeneration)
+                .capability(crate::agent::AgentCapability::ToolCalling)
+                .build();
+            standalone.register_agent(agent);
+
+            let task = crate::agent::AgentTask::builder(task_id, prompt)
+                .priority(priority)
+                .build();
+            standalone.submit_task(task, &[])?;
+            let summary = standalone.run_workflow()?;
+
+            let response = json!({
+                "task_id": task_id,
+                "status": format!("{:?}", summary.status),
+                "completed_tasks": summary.completed_tasks,
+                "total_tasks": summary.total_tasks,
+            });
+            Ok(McpToolResult::success(response.to_string()))
+        }
     }
 }
 

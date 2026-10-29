@@ -9,6 +9,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
+use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
 
 /// Metadata descriptor for an MCP resource.
@@ -115,6 +116,76 @@ pub trait McpResourceProvider: Send + Sync {
     fn read_resource(&self, uri: &str) -> Result<Vec<McpResourceContent>>;
 }
 
+/// Standard MCP resource provider exposing live FlashStore telemetry and manifests.
+pub struct FlashStorageResourceProvider {
+    store: Arc<FlashStore>,
+}
+
+impl FlashStorageResourceProvider {
+    /// Creates a new `FlashStorageResourceProvider` wrapping a FlashStore instance.
+    pub fn new(store: Arc<FlashStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl McpResourceProvider for FlashStorageResourceProvider {
+    fn list_resources(&self) -> Vec<McpResourceDefinition> {
+        vec![
+            McpResourceDefinition::new(
+                "flash://stats",
+                "FlashStore Live Statistics",
+                "Real-time LSM-tree engine statistics including memtable byte sizes and SSTable file counts",
+                "application/json",
+            ),
+            McpResourceDefinition::new(
+                "flash://manifest",
+                "FlashStore Manifest & Level Hierarchy",
+                "Overview of SSTable file counts across tiered LSM levels",
+                "application/json",
+            ),
+        ]
+    }
+
+    fn read_resource(&self, uri: &str) -> Result<Vec<McpResourceContent>> {
+        match uri {
+            "flash://stats" => {
+                let stats = self.store.stats();
+                let payload = serde_json::json!({
+                    "active_memtable_size_bytes": stats.active_memtable_size,
+                    "immutable_memtables_count": stats.immutable_memtables_count,
+                    "levels_file_count": stats.levels_file_count,
+                });
+                let text = serde_json::to_string_pretty(&payload)
+                    .unwrap_or_else(|_| "{}".to_string());
+                Ok(vec![McpResourceContent::text(
+                    "flash://stats",
+                    "application/json",
+                    text,
+                )])
+            }
+            "flash://manifest" => {
+                let stats = self.store.stats();
+                let payload = serde_json::json!({
+                    "manifest_status": "active",
+                    "total_levels": stats.levels_file_count.len(),
+                    "levels_distribution": stats.levels_file_count,
+                });
+                let text = serde_json::to_string_pretty(&payload)
+                    .unwrap_or_else(|_| "{}".to_string());
+                Ok(vec![McpResourceContent::text(
+                    "flash://manifest",
+                    "application/json",
+                    text,
+                )])
+            }
+            _ => Err(FlashStoreError::InvalidArgument(format!(
+                "Resource not found: {}",
+                uri
+            ))),
+        }
+    }
+}
+
 /// Registry managing and routing MCP resource lookups.
 #[derive(Default)]
 pub struct McpResourceRegistry {
@@ -127,6 +198,18 @@ impl McpResourceRegistry {
         Self {
             providers: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Constructs a resource registry pre-populated with standard FlashStore resource providers.
+    pub fn with_flash_store(store: Arc<FlashStore>) -> Self {
+        let registry = Self::new();
+        registry.register_storage_resources(store);
+        registry
+    }
+
+    /// Registers the standard FlashStore resource provider under the `flash` scheme.
+    pub fn register_storage_resources(&self, store: Arc<FlashStore>) {
+        self.register("flash", Arc::new(FlashStorageResourceProvider::new(store)));
     }
 
     /// Registers a provider for a specific URI scheme or prefix.

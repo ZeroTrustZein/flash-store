@@ -8,11 +8,14 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 
+use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
 use crate::mcp::config::McpServerConfig;
 use crate::mcp::protocol::{error_codes, JsonRpcError, JsonRpcRequest, JsonRpcResponse, RequestId};
-use crate::mcp::resources::{McpListResourcesResult, McpReadResourceResult, McpResourceRegistry};
-use crate::mcp::tools::{McpListToolsResult, McpToolCallParams, McpToolRegistry};
+use crate::mcp::resources::{
+    McpListResourcesResult, McpReadResourceResult, McpResourceProvider, McpResourceRegistry,
+};
+use crate::mcp::tools::{McpListToolsResult, McpToolCallParams, McpToolHandler, McpToolRegistry};
 use crate::mcp::transport::McpTransport;
 use crate::mcp::types::{
     Implementation, InitializeParams, InitializeResult, LoggingCapability, PromptsCapability,
@@ -38,6 +41,27 @@ impl McpServer {
             tools,
             resources,
         }
+    }
+
+    /// Creates an `McpServer` initialized with standard tools and resources backed by `FlashStore`.
+    pub fn with_store(config: McpServerConfig, store: Arc<FlashStore>) -> Self {
+        let tools = Arc::new(McpToolRegistry::with_flash_store(store.clone()));
+        let resources = Arc::new(McpResourceRegistry::with_flash_store(store));
+        Self::new(config, tools, resources)
+    }
+
+    /// Registers a tool handler into the active tool registry.
+    pub fn register_tool(&self, handler: Arc<dyn McpToolHandler>) {
+        self.tools.register(handler);
+    }
+
+    /// Registers a resource provider into the active resource registry.
+    pub fn register_resource_provider(
+        &self,
+        prefix: impl Into<String>,
+        provider: Arc<dyn McpResourceProvider>,
+    ) {
+        self.resources.register(prefix, provider);
     }
 
     /// Accesses the server configuration.

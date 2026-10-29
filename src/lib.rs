@@ -148,15 +148,16 @@ pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
 pub use mcp::{
-    mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
-    JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability,
-    McpContent, McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
-    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer,
-    McpServerConfig, McpServerConfigBuilder, McpToolCallParams, McpToolDefinition, McpToolHandler,
-    McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide, MockMcpTransport,
-    PromptsCapability, RequestId, ResourcesCapability, ServerCapabilities, StandardToolSchemas,
-    StdioTransport, ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
-    MCP_PROTOCOL_VERSION,
+    mcp_error_codes, ClientCapabilities, FlashAgentRunTool, FlashDeleteTool, FlashGetTool,
+    FlashPutTool, FlashRagQueryTool, FlashScanTool, FlashStatsTool, FlashStorageResourceProvider,
+    Implementation, InitializeParams, InitializeResult, JsonRpcError, JsonRpcNotification,
+    JsonRpcRequest, JsonRpcResponse, LoggingCapability, McpContent, McpListResourcesResult,
+    McpListToolsResult, McpLogLevel, McpReadResourceResult, McpResourceContent,
+    McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer, McpServerConfig,
+    McpServerConfigBuilder, McpToolCallParams, McpToolDefinition, McpToolHandler, McpToolRegistry,
+    McpToolResult, McpTransport, MockMcpClientSide, MockMcpTransport, PromptsCapability,
+    RequestId, ResourcesCapability, ServerCapabilities, StandardToolSchemas, StdioTransport,
+    ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
 };
 pub use rag::{
     borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,
@@ -214,7 +215,9 @@ pub mod prelude {
         MemtableIterator, MergingIterator, SSTableIterator, StorageIterator,
     };
     pub use crate::mcp::{
-        mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, InitializeResult,
+        mcp_error_codes, ClientCapabilities, FlashAgentRunTool, FlashDeleteTool, FlashGetTool,
+        FlashPutTool, FlashRagQueryTool, FlashScanTool, FlashStatsTool,
+        FlashStorageResourceProvider, Implementation, InitializeParams, InitializeResult,
         JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability,
         McpContent, McpListResourcesResult, McpListToolsResult, McpLogLevel, McpReadResourceResult,
         McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,

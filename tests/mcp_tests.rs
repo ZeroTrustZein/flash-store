@@ -14,13 +14,16 @@ use serde_json::json;
 
 use flash_store::error::Result;
 use flash_store::mcp::{
-    mcp_error_codes, ClientCapabilities, Implementation, InitializeParams, JsonRpcError,
-    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpContent, McpLogLevel,
-    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer,
-    McpServerConfig, McpServerConfigBuilder, McpToolDefinition, McpToolHandler, McpToolRegistry,
-    McpToolResult, MockMcpTransport, RequestId, StandardToolSchemas, DEFAULT_SERVER_NAME,
-    DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+    mcp_error_codes, ClientCapabilities, FlashAgentRunTool, FlashDeleteTool, FlashGetTool,
+    FlashPutTool, FlashRagQueryTool, FlashScanTool, FlashStatsTool, FlashStorageResourceProvider,
+    Implementation, InitializeParams, JsonRpcError, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, McpContent, McpLogLevel, McpResourceContent, McpResourceDefinition,
+    McpResourceProvider, McpResourceRegistry, McpServer, McpServerConfig, McpServerConfigBuilder,
+    McpToolDefinition, McpToolHandler, McpToolRegistry, McpToolResult, MockMcpTransport,
+    RequestId, StandardToolSchemas, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
+    MCP_PROTOCOL_VERSION,
 };
+use flash_store::{FlashStore, OptionsBuilder};
 
 #[test]
 fn test_mcp_config_defaults_and_builder() {
@@ -315,6 +318,204 @@ fn test_mcp_server_mock_transport_end_to_end() {
     drop(client);
     transport.close();
     server_handle.join().unwrap();
+}
+
+#[test]
+fn test_flash_get_put_delete_tools() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    let put_tool = FlashPutTool::new(store.clone());
+    let get_tool = FlashGetTool::new(store.clone());
+    let delete_tool = FlashDeleteTool::new(store.clone());
+
+    // 1. Initial get - not found
+    let get_res = get_tool
+        .execute(Some(json!({"key": "test_k1"})))
+        .expect("get failed");
+    assert_eq!(get_res.is_error, Some(false));
+    let parsed: serde_json::Value =
+        serde_json::from_str(get_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(parsed.get("found").unwrap(), false);
+
+    // 2. Put key-value
+    let put_res = put_tool
+        .execute(Some(json!({"key": "test_k1", "value": "val_123"})))
+        .expect("put failed");
+    assert_eq!(put_res.is_error, Some(false));
+    let put_parsed: serde_json::Value =
+        serde_json::from_str(put_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(put_parsed.get("success").unwrap(), true);
+
+    // 3. Get key-value - found
+    let get_res2 = get_tool
+        .execute(Some(json!({"key": "test_k1"})))
+        .expect("get failed");
+    let parsed2: serde_json::Value =
+        serde_json::from_str(get_res2.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(parsed2.get("found").unwrap(), true);
+    assert_eq!(parsed2.get("value").unwrap(), "val_123");
+
+    // 4. Delete key
+    let del_res = delete_tool
+        .execute(Some(json!({"key": "test_k1"})))
+        .expect("delete failed");
+    let del_parsed: serde_json::Value =
+        serde_json::from_str(del_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(del_parsed.get("success").unwrap(), true);
+
+    // 5. Get after delete - not found
+    let get_res3 = get_tool
+        .execute(Some(json!({"key": "test_k1"})))
+        .expect("get failed");
+    let parsed3: serde_json::Value =
+        serde_json::from_str(get_res3.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(parsed3.get("found").unwrap(), false);
+}
+
+#[test]
+fn test_flash_scan_and_stats_tools() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    store.put("alpha", "1").unwrap();
+    store.put("beta", "2").unwrap();
+    store.put("gamma", "3").unwrap();
+
+    let scan_tool = FlashScanTool::new(store.clone());
+    let stats_tool = FlashStatsTool::new(store);
+
+    let scan_res = scan_tool
+        .execute(Some(json!({"limit": 2})))
+        .expect("scan failed");
+    let parsed: serde_json::Value =
+        serde_json::from_str(scan_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(parsed.get("count").unwrap(), 2);
+
+    let stats_res = stats_tool.execute(None).expect("stats failed");
+    let stats_parsed: serde_json::Value =
+        serde_json::from_str(stats_res.content[0].as_text().unwrap()).unwrap();
+    assert!(stats_parsed.get("active_memtable_size_bytes").is_some());
+}
+
+#[test]
+fn test_flash_storage_resource_provider() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    let provider = FlashStorageResourceProvider::new(store);
+    let resources = provider.list_resources();
+    assert_eq!(resources.len(), 2);
+    assert!(resources.iter().any(|r| r.uri == "flash://stats"));
+    assert!(resources.iter().any(|r| r.uri == "flash://manifest"));
+
+    let read_stats = provider.read_resource("flash://stats").expect("read stats");
+    assert_eq!(read_stats.len(), 1);
+    assert_eq!(read_stats[0].uri, "flash://stats");
+    assert!(read_stats[0].text.as_ref().unwrap().contains("active_memtable_size_bytes"));
+
+    let read_manifest = provider.read_resource("flash://manifest").expect("read manifest");
+    assert_eq!(read_manifest.len(), 1);
+    assert_eq!(read_manifest[0].uri, "flash://manifest");
+    assert!(read_manifest[0].text.as_ref().unwrap().contains("manifest_status"));
+}
+
+#[test]
+fn test_flash_rag_and_agent_tools() {
+    let rag_tool = FlashRagQueryTool::new(None);
+    let rag_res = rag_tool
+        .execute(Some(json!({"query": "embedded database", "top_k": 3})))
+        .expect("rag query failed");
+    let rag_parsed: serde_json::Value =
+        serde_json::from_str(rag_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(rag_parsed.get("count").unwrap(), 0);
+
+    let agent_tool = FlashAgentRunTool::new(None);
+    let agent_res = agent_tool
+        .execute(Some(json!({
+            "task_id": "test-agent-task",
+            "prompt": "Evaluate system health",
+            "priority": "high"
+        })))
+        .expect("agent run failed");
+    let agent_parsed: serde_json::Value =
+        serde_json::from_str(agent_res.content[0].as_text().unwrap()).unwrap();
+    assert_eq!(agent_parsed.get("task_id").unwrap(), "test-agent-task");
+}
+
+#[test]
+fn test_mcp_server_with_store_end_to_end() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let opts = OptionsBuilder::new().dir(temp_dir.path()).build();
+    let store = Arc::new(FlashStore::open(opts).unwrap());
+
+    let config = McpServerConfigBuilder::new()
+        .server_name("flash-mcp-e2e")
+        .build();
+    let server = McpServer::with_store(config, store);
+
+    // 1. tools/list should return default storage tools
+    let list_req = JsonRpcRequest::new(101, "tools/list", None);
+    let list_resp = server.handle_request(list_req);
+    let list_val = list_resp.result.unwrap();
+    let tools = list_val.get("tools").unwrap().as_array().unwrap();
+    assert_eq!(tools.len(), 5);
+    let tool_names: Vec<&str> = tools
+        .iter()
+        .map(|t| t.get("name").unwrap().as_str().unwrap())
+        .collect();
+    assert!(tool_names.contains(&"flash_get"));
+    assert!(tool_names.contains(&"flash_put"));
+    assert!(tool_names.contains(&"flash_delete"));
+    assert!(tool_names.contains(&"flash_scan"));
+    assert!(tool_names.contains(&"flash_stats"));
+
+    // 2. tools/call -> flash_put
+    let put_req = JsonRpcRequest::new(
+        102,
+        "tools/call",
+        Some(json!({
+            "name": "flash_put",
+            "arguments": {"key": "mcp_k", "value": "mcp_v"}
+        })),
+    );
+    let put_resp = server.handle_request(put_req);
+    assert!(put_resp.error.is_none());
+
+    // 3. tools/call -> flash_get
+    let get_req = JsonRpcRequest::new(
+        103,
+        "tools/call",
+        Some(json!({
+            "name": "flash_get",
+            "arguments": {"key": "mcp_k"}
+        })),
+    );
+    let get_resp = server.handle_request(get_req);
+    assert!(get_resp.error.is_none());
+    let get_val = get_resp.result.unwrap();
+    let content = get_val.get("content").unwrap().as_array().unwrap();
+    assert!(content[0].get("text").unwrap().as_str().unwrap().contains("\"found\":true"));
+
+    // 4. resources/list
+    let res_req = JsonRpcRequest::new(104, "resources/list", None);
+    let res_resp = server.handle_request(res_req);
+    assert!(res_resp.error.is_none());
+    let res_val = res_resp.result.unwrap();
+    let res_list = res_val.get("resources").unwrap().as_array().unwrap();
+    assert_eq!(res_list.len(), 2);
+
+    // 5. resources/read
+    let read_req = JsonRpcRequest::new(
+        105,
+        "resources/read",
+        Some(json!({"uri": "flash://stats"})),
+    );
+    let read_resp = server.handle_request(read_req);
+    assert!(read_resp.error.is_none());
 }
 
 #[test]

@@ -22,13 +22,14 @@ pub use protocol::{
     JsonRpcResponse, RequestId,
 };
 pub use resources::{
-    McpListResourcesResult, McpReadResourceResult, McpResourceContent, McpResourceDefinition,
-    McpResourceProvider, McpResourceRegistry,
+    FlashStorageResourceProvider, McpListResourcesResult, McpReadResourceResult,
+    McpResourceContent, McpResourceDefinition, McpResourceProvider, McpResourceRegistry,
 };
 pub use server::McpServer;
 pub use tools::{
-    McpListToolsResult, McpToolCallParams, McpToolDefinition, McpToolHandler, McpToolRegistry,
-    McpToolResult, StandardToolSchemas,
+    FlashAgentRunTool, FlashDeleteTool, FlashGetTool, FlashPutTool, FlashRagQueryTool,
+    FlashScanTool, FlashStatsTool, McpListToolsResult, McpToolCallParams, McpToolDefinition,
+    McpToolHandler, McpToolRegistry, McpToolResult, StandardToolSchemas,
 };
 pub use transport::{McpTransport, MockMcpClientSide, MockMcpTransport, StdioTransport};
 pub use types::{

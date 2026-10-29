@@ -151,6 +151,14 @@ impl McpContent {
         }
     }
 
+    /// Returns a reference to the text if this is a `Text` variant.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            McpContent::Text { text } => Some(text.as_str()),
+            _ => None,
+        }
+    }
+
     /// Creates an embedded resource content item.
     pub fn resource(resource: Value) -> Self {
         McpContent::Resource { resource }
