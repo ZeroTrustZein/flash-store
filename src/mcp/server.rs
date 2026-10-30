@@ -12,7 +12,9 @@ use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
 use crate::mcp::config::McpServerConfig;
 use crate::mcp::notifications::McpNotificationBroadcaster;
-use crate::mcp::prompts::{McpGetPromptParams, McpListPromptsResult, McpPromptHandler, McpPromptRegistry};
+use crate::mcp::prompts::{
+    McpGetPromptParams, McpListPromptsResult, McpPromptHandler, McpPromptRegistry,
+};
 use crate::mcp::protocol::{error_codes, JsonRpcError, JsonRpcRequest, JsonRpcResponse, RequestId};
 use crate::mcp::resources::{
     McpListResourcesResult, McpReadResourceResult, McpResourceProvider, McpResourceRegistry,
@@ -417,7 +419,10 @@ impl McpServer {
                 Err(e) => {
                     return JsonRpcResponse::error(
                         Some(id),
-                        JsonRpcError::invalid_params(format!("Invalid prompts/get parameters: {}", e)),
+                        JsonRpcError::invalid_params(format!(
+                            "Invalid prompts/get parameters: {}",
+                            e
+                        )),
                     );
                 }
             },
@@ -429,7 +434,10 @@ impl McpServer {
             }
         };
 
-        match self.prompts.render(&get_params.name, get_params.arguments.as_ref()) {
+        match self
+            .prompts
+            .render(&get_params.name, get_params.arguments.as_ref())
+        {
             Ok(prompt_result) => match serde_json::to_value(prompt_result) {
                 Ok(v) => JsonRpcResponse::success(id, v),
                 Err(e) => JsonRpcResponse::error(
@@ -460,15 +468,16 @@ impl McpServer {
             );
         }
 
-        let level_str = match params.and_then(|p| p.get("level").and_then(|l| l.as_str().map(String::from))) {
-            Some(l) => l,
-            None => {
-                return JsonRpcResponse::error(
-                    Some(id),
-                    JsonRpcError::invalid_params("Missing required 'level' parameter"),
-                );
-            }
-        };
+        let level_str =
+            match params.and_then(|p| p.get("level").and_then(|l| l.as_str().map(String::from))) {
+                Some(l) => l,
+                None => {
+                    return JsonRpcResponse::error(
+                        Some(id),
+                        JsonRpcError::invalid_params("Missing required 'level' parameter"),
+                    );
+                }
+            };
 
         let level = match serde_json::from_value::<McpLogLevel>(Value::String(level_str.clone())) {
             Ok(lvl) => lvl,

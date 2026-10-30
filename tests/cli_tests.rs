@@ -1398,362 +1398,11 @@ fn test_cli_mcp_tools_and_call_lifecycle() -> Result<()> {
         ..Default::default()
     };
 
-    // 1. List tools in text, json, tsv
-    for fmt in ["text", "json", "tsv"] {
-        run(
-            Cmd::Mcp {
-                command: McpCmd::Tools {
-                    format: fmt.into(),
-                },
-            },
-            &opts,
-        )?;
-    }
-
-    // 2. Put key via MCP call
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "flash_put".into(),
-                args: Some(r#"{"key": "mcp_k1", "value": "mcp_v1"}"#.into()),
-                file: None,
-                format: "json".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 3. Get key via MCP call
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "flash_get".into(),
-                args: Some(r#"{"key": "mcp_k1"}"#.into()),
-                file: None,
-                format: "text".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 4. Scan via MCP call with arguments from file
-    let scan_args_file = dir.path().join("scan_args.json");
-    fs::write(&scan_args_file, r#"{"limit": 5}"#)?;
-
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "flash_scan".into(),
-                args: None,
-                file: Some(scan_args_file),
-                format: "tsv".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 5. Query stats tool
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "flash_stats".into(),
-                args: None,
-                file: None,
-                format: "json".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_mcp_resources_and_read_lifecycle() -> Result<()> {
-    let dir = tempdir().unwrap();
-    let opts = GlobalOpts {
-        path: dir.path().to_path_buf(),
-        quiet: true,
-        ..Default::default()
-    };
-
-    // 1. List resources in text, json, tsv
-    for fmt in ["text", "json", "tsv"] {
-        run(
-            Cmd::Mcp {
-                command: McpCmd::Resources {
-                    format: fmt.into(),
-                },
-            },
-            &opts,
-        )?;
-    }
-
-    // 2. Read flash://stats
-    for fmt in ["text", "json", "tsv"] {
-        run(
-            Cmd::Mcp {
-                command: McpCmd::Read {
-                    uri: "flash://stats".into(),
-                    format: fmt.into(),
-                },
-            },
-            &opts,
-        )?;
-    }
-
-    // 3. Read flash://manifest
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Read {
-                uri: "flash://manifest".into(),
-                format: "text".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_mcp_prompts_and_get_prompt_lifecycle() -> Result<()> {
-    let dir = tempdir().unwrap();
-    let opts = GlobalOpts {
-        path: dir.path().to_path_buf(),
-        quiet: true,
-        ..Default::default()
-    };
-
-    // 1. List prompts in text, json, tsv
-    for fmt in ["text", "json", "tsv"] {
-        run(
-            Cmd::Mcp {
-                command: McpCmd::Prompts {
-                    format: fmt.into(),
-                },
-            },
-            &opts,
-        )?;
-    }
-
-    // 2. Get flash_troubleshoot prompt
-    run(
-        Cmd::Mcp {
-            command: McpCmd::GetPrompt {
-                name: "flash_troubleshoot".into(),
-                args: Some(r#"{"issue": "Write stall in Level 0", "component": "LSM"}"#.into()),
-                format: "json".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 3. Get flash_rag_synthesize prompt
-    run(
-        Cmd::Mcp {
-            command: McpCmd::GetPrompt {
-                name: "flash_rag_synthesize".into(),
-                args: Some(r#"{"query": "How does WAL ensure durability?", "context": "WAL persists records sequentially."}"#.into()),
-                format: "text".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 4. Get flash_agent_orchestrate prompt
-    run(
-        Cmd::Mcp {
-            command: McpCmd::GetPrompt {
-                name: "flash_agent_orchestrate".into(),
-                args: Some(r#"{"goal": "Orchestrate backup and verification"}"#.into()),
-                format: "tsv".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_mcp_info_and_raw_request() -> Result<()> {
-    let dir = tempdir().unwrap();
-    let opts = GlobalOpts {
-        path: dir.path().to_path_buf(),
-        quiet: true,
-        ..Default::default()
-    };
-
-    // 1. Info in text, json, tsv
-    for fmt in ["text", "json", "tsv"] {
-        run(
-            Cmd::Mcp {
-                command: McpCmd::Info {
-                    format: fmt.into(),
-                },
-            },
-            &opts,
-        )?;
-    }
-
-    // 2. Raw JSON-RPC ping request via inline string
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Request {
-                json: Some(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.into()),
-                file: None,
-                format: "json".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    // 3. Raw JSON-RPC tools/list request via file
-    let rpc_file = dir.path().join("list_tools_req.json");
-    fs::write(
-        &rpc_file,
-        r#"{"jsonrpc":"2.0","id":"req-2","method":"tools/list"}"#,
-    )?;
-
-    run(
-        Cmd::Mcp {
-            command: McpCmd::Request {
-                json: None,
-                file: Some(rpc_file),
-                format: "text".into(),
-            },
-        },
-        &opts,
-    )?;
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_mcp_error_handling_and_validation() -> Result<()> {
-    let dir = tempdir().unwrap();
-    let opts = GlobalOpts {
-        path: dir.path().to_path_buf(),
-        quiet: true,
-        ..Default::default()
-    };
-
-    // 1. Unknown tool invocation
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "non_existent_tool_xyz".into(),
-                args: None,
-                file: None,
-                format: "text".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 2. Tool with invalid JSON args
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::Call {
-                name: "flash_put".into(),
-                args: Some("{invalid_json:".into()),
-                file: None,
-                format: "text".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 3. Unknown resource read
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::Read {
-                uri: "flash://unknown/resource".into(),
-                format: "text".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 4. Unknown prompt get
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::GetPrompt {
-                name: "non_existent_prompt_template".into(),
-                args: None,
-                format: "text".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 5. Raw request with no json or file
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::Request {
-                json: None,
-                file: None,
-                format: "json".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 6. Raw request with malformed JSON-RPC
-    let res = run(
-        Cmd::Mcp {
-            command: McpCmd::Request {
-                json: Some("not a json object".into()),
-                file: None,
-                format: "json".into(),
-            },
-        },
-        &opts,
-    );
-    assert!(res.is_err());
-
-    // 7. REPL invalid MCP subcommands
-    let db = open_db(&opts)?;
-    let res = execute_repl_command(&db, &["MCP".into(), "UNKNOWN_SUBCOMMAND".into()]);
-    assert!(res.is_err());
-
-    let res = execute_repl_command(&db, &["MCP".into(), "CALL".into()]);
-    assert!(res.is_err());
-
-    let res = execute_repl_command(&db, &["MCP".into(), "READ".into()]);
-    assert!(res.is_err());
-
-    let res = execute_repl_command(&db, &["MCP".into(), "GET-PROMPT".into()]);
-    assert!(res.is_err());
-
-    let res = execute_repl_command(&db, &["MCP".into(), "REQ".into()]);
-    assert!(res.is_err());
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_mcp_tools_and_call_lifecycle() -> Result<()> {
-    let dir = tempdir().unwrap();
-    let opts = GlobalOpts {
-        path: dir.path().to_path_buf(),
-        quiet: true,
-        ..Default::default()
-    };
-
     // 1. List tools in all formats
     for fmt in ["text", "json", "tsv"] {
         run(
             Cmd::Mcp {
-                command: McpCmd::Tools {
-                    format: fmt.into(),
-                },
+                command: McpCmd::Tools { format: fmt.into() },
             },
             &opts,
         )?;
@@ -1882,9 +1531,7 @@ fn test_cli_mcp_resources_and_prompts_lifecycle() -> Result<()> {
     for fmt in ["text", "json", "tsv"] {
         run(
             Cmd::Mcp {
-                command: McpCmd::Resources {
-                    format: fmt.into(),
-                },
+                command: McpCmd::Resources { format: fmt.into() },
             },
             &opts,
         )?;
@@ -1909,9 +1556,7 @@ fn test_cli_mcp_resources_and_prompts_lifecycle() -> Result<()> {
     for fmt in ["text", "json", "tsv"] {
         run(
             Cmd::Mcp {
-                command: McpCmd::Prompts {
-                    format: fmt.into(),
-                },
+                command: McpCmd::Prompts { format: fmt.into() },
             },
             &opts,
         )?;
@@ -1922,7 +1567,10 @@ fn test_cli_mcp_resources_and_prompts_lifecycle() -> Result<()> {
         Cmd::Mcp {
             command: McpCmd::GetPrompt {
                 name: "flash_troubleshoot".into(),
-                args: Some(r#"{"issue": "Corruption in sstable block 000001", "component": "sstable"}"#.into()),
+                args: Some(
+                    r#"{"issue": "Corruption in sstable block 000001", "component": "sstable"}"#
+                        .into(),
+                ),
                 format: "text".into(),
             },
         },
@@ -1957,9 +1605,7 @@ fn test_cli_mcp_info_and_request() -> Result<()> {
     for fmt in ["text", "json", "tsv"] {
         run(
             Cmd::Mcp {
-                command: McpCmd::Info {
-                    format: fmt.into(),
-                },
+                command: McpCmd::Info { format: fmt.into() },
             },
             &opts,
         )?;
@@ -1985,7 +1631,8 @@ fn test_cli_mcp_info_and_request() -> Result<()> {
     run(
         Cmd::Mcp {
             command: McpCmd::Request {
-                json: Some(r#"{
+                json: Some(
+                    r#"{
                     "jsonrpc": "2.0",
                     "id": "init_1",
                     "method": "initialize",
@@ -1994,7 +1641,9 @@ fn test_cli_mcp_info_and_request() -> Result<()> {
                         "capabilities": {},
                         "clientInfo": {"name": "test-client", "version": "1.0.0"}
                     }
-                }"#.into()),
+                }"#
+                    .into(),
+                ),
                 file: None,
                 format: "text".into(),
             },

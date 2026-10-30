@@ -70,8 +70,8 @@ impl McpResourceProvider for FlashRagResourceProvider {
                     "cache_hit_rate": metrics.cache_hit_rate,
                     "mean_latency_ms": metrics.search_latency.avg_micros / 1000.0,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://rag/stats",
                     "application/json",
@@ -91,8 +91,8 @@ impl McpResourceProvider for FlashRagResourceProvider {
                     "semantic_cache_threshold": cfg.semantic_cache_threshold,
                     "semantic_cache_ttl_secs": cfg.semantic_cache_ttl_secs,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://rag/config",
                     "application/json",
@@ -151,8 +151,8 @@ impl McpResourceProvider for FlashAgentResourceProvider {
                     "created_at": state.created_at,
                     "updated_at": state.updated_at,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://agent/state",
                     "application/json",
@@ -176,8 +176,8 @@ impl McpResourceProvider for FlashAgentResourceProvider {
                     "count": agents.len(),
                     "agents": agents,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://agent/agents",
                     "application/json",
@@ -224,14 +224,23 @@ impl McpSubsystem {
 
         // Build resource registry
         let resources = Arc::new(McpResourceRegistry::new());
-        resources.register("flash", Arc::new(FlashStorageResourceProvider::new(store.clone())));
+        resources.register(
+            "flash",
+            Arc::new(FlashStorageResourceProvider::new(store.clone())),
+        );
 
         if let Some(rag) = &rag_engine {
-            resources.register("flash", Arc::new(FlashRagResourceProvider::new(rag.clone())));
+            resources.register(
+                "flash",
+                Arc::new(FlashRagResourceProvider::new(rag.clone())),
+            );
         }
 
         if let Some(agent) = &agent_engine {
-            resources.register("flash", Arc::new(FlashAgentResourceProvider::new(agent.clone())));
+            resources.register(
+                "flash",
+                Arc::new(FlashAgentResourceProvider::new(agent.clone())),
+            );
         }
 
         // Build prompt registry

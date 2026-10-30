@@ -155,8 +155,8 @@ impl McpResourceProvider for FlashStorageResourceProvider {
                     "immutable_memtables_count": stats.immutable_memtables_count,
                     "levels_file_count": stats.levels_file_count,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://stats",
                     "application/json",
@@ -170,8 +170,8 @@ impl McpResourceProvider for FlashStorageResourceProvider {
                     "total_levels": stats.levels_file_count.len(),
                     "levels_distribution": stats.levels_file_count,
                 });
-                let text = serde_json::to_string_pretty(&payload)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let text =
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
                 Ok(vec![McpResourceContent::text(
                     "flash://manifest",
                     "application/json",

@@ -41,9 +41,7 @@ impl<R: Read + Send + 'static, W: Write + Send + 'static> McpTransport for Stdio
         let mut line = String::new();
         let bytes_read = {
             let mut reader = self.reader.lock();
-            reader
-                .read_line(&mut line)
-                .map_err(FlashStoreError::Io)?
+            reader.read_line(&mut line).map_err(FlashStoreError::Io)?
         };
 
         if bytes_read == 0 {

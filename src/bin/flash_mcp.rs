@@ -81,7 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let agent_engine = if args.agent {
-        let mut engine = flash_store::agent::AgentEngine::new("flash_mcp").with_store(store.clone());
+        let mut engine =
+            flash_store::agent::AgentEngine::new("flash_mcp").with_store(store.clone());
         flash_store::cli::mcp::seed_standard_agents_in_engine(&mut engine);
         Some(Arc::new(RwLock::new(engine)))
     } else {

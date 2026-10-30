@@ -235,7 +235,11 @@ pub fn parse_json_args(raw: Option<String>, file: Option<PathBuf>) -> Result<Val
             ))
         })?;
         serde_json::from_str(&content).map_err(|e| {
-            FlashStoreError::InvalidArgument(format!("Invalid JSON in file '{}': {}", f.display(), e))
+            FlashStoreError::InvalidArgument(format!(
+                "Invalid JSON in file '{}': {}",
+                f.display(),
+                e
+            ))
         })
     } else if let Some(s) = raw {
         if s.trim().is_empty() {
@@ -287,7 +291,9 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
             let db = Arc::new(open_db(opts)?);
             let rag_engine = {
                 let config = RagConfig::default();
-                RagEngine::recover(config, db.clone()).ok().map(|e| Arc::new(RwLock::new(e)))
+                RagEngine::recover(config, db.clone())
+                    .ok()
+                    .map(|e| Arc::new(RwLock::new(e)))
             };
             let agent_engine = {
                 let mut engine = AgentEngine::new("mcp_server").with_store(db.clone());
@@ -332,7 +338,10 @@ pub fn run_mcp_command(cmd: McpCmd, opts: &GlobalOpts) -> Result<()> {
                 arguments: Some(arguments),
             };
 
-            let res = subsystem.server().tools().call(&params.name, params.arguments)?;
+            let res = subsystem
+                .server()
+                .tools()
+                .call(&params.name, params.arguments)?;
             formatter::format_mcp_tool_result(&res, fmt);
             Ok(())
         }

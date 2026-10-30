@@ -416,12 +416,22 @@ fn test_flash_storage_resource_provider() {
     let read_stats = provider.read_resource("flash://stats").expect("read stats");
     assert_eq!(read_stats.len(), 1);
     assert_eq!(read_stats[0].uri, "flash://stats");
-    assert!(read_stats[0].text.as_ref().unwrap().contains("active_memtable_size_bytes"));
+    assert!(read_stats[0]
+        .text
+        .as_ref()
+        .unwrap()
+        .contains("active_memtable_size_bytes"));
 
-    let read_manifest = provider.read_resource("flash://manifest").expect("read manifest");
+    let read_manifest = provider
+        .read_resource("flash://manifest")
+        .expect("read manifest");
     assert_eq!(read_manifest.len(), 1);
     assert_eq!(read_manifest[0].uri, "flash://manifest");
-    assert!(read_manifest[0].text.as_ref().unwrap().contains("manifest_status"));
+    assert!(read_manifest[0]
+        .text
+        .as_ref()
+        .unwrap()
+        .contains("manifest_status"));
 }
 
 #[test]
@@ -499,7 +509,12 @@ fn test_mcp_server_with_store_end_to_end() {
     assert!(get_resp.error.is_none());
     let get_val = get_resp.result.unwrap();
     let content = get_val.get("content").unwrap().as_array().unwrap();
-    assert!(content[0].get("text").unwrap().as_str().unwrap().contains("\"found\":true"));
+    assert!(content[0]
+        .get("text")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("\"found\":true"));
 
     // 4. resources/list
     let res_req = JsonRpcRequest::new(104, "resources/list", None);
@@ -510,11 +525,8 @@ fn test_mcp_server_with_store_end_to_end() {
     assert_eq!(res_list.len(), 2);
 
     // 5. resources/read
-    let read_req = JsonRpcRequest::new(
-        105,
-        "resources/read",
-        Some(json!({"uri": "flash://stats"})),
-    );
+    let read_req =
+        JsonRpcRequest::new(105, "resources/read", Some(json!({"uri": "flash://stats"})));
     let read_resp = server.handle_request(read_req);
     assert!(read_resp.error.is_none());
 }
@@ -554,9 +566,14 @@ fn test_mcp_prompt_definitions_and_registry() {
     // Test flash_rag_synthesize render
     let mut rag_args = std::collections::HashMap::new();
     rag_args.insert("query".to_string(), "What is LSM tree?".to_string());
-    rag_args.insert("context".to_string(), "LSM trees optimize write throughput.".to_string());
+    rag_args.insert(
+        "context".to_string(),
+        "LSM trees optimize write throughput.".to_string(),
+    );
 
-    let rag_res = registry.render("flash_rag_synthesize", Some(&rag_args)).unwrap();
+    let rag_res = registry
+        .render("flash_rag_synthesize", Some(&rag_args))
+        .unwrap();
     let rag_text = rag_res.messages[0].content.as_text().unwrap();
     assert!(rag_text.contains("What is LSM tree?"));
     assert!(rag_text.contains("LSM trees optimize write throughput."));
@@ -565,7 +582,9 @@ fn test_mcp_prompt_definitions_and_registry() {
     let mut agent_args = std::collections::HashMap::new();
     agent_args.insert("goal".to_string(), "Deploy distributed cluster".to_string());
 
-    let agent_res = registry.render("flash_agent_orchestrate", Some(&agent_args)).unwrap();
+    let agent_res = registry
+        .render("flash_agent_orchestrate", Some(&agent_args))
+        .unwrap();
     let agent_text = agent_res.messages[0].content.as_text().unwrap();
     assert!(agent_text.contains("Deploy distributed cluster"));
 }
@@ -603,14 +622,17 @@ fn test_mcp_server_prompts_and_logging_rpc() {
     let get_val = get_resp.result.unwrap();
     let msgs = get_val.get("messages").unwrap().as_array().unwrap();
     assert_eq!(msgs.len(), 1);
-    assert!(msgs[0].get("content").unwrap().get("text").unwrap().as_str().unwrap().contains("WAL replay failure"));
+    assert!(msgs[0]
+        .get("content")
+        .unwrap()
+        .get("text")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("WAL replay failure"));
 
     // 3. logging/setLevel
-    let set_lvl_req = JsonRpcRequest::new(
-        203,
-        "logging/setLevel",
-        Some(json!({"level": "debug"})),
-    );
+    let set_lvl_req = JsonRpcRequest::new(203, "logging/setLevel", Some(json!({"level": "debug"})));
     let set_lvl_resp = server.handle_request(set_lvl_req);
     assert!(set_lvl_resp.error.is_none());
     assert_eq!(server.notifications().min_log_level(), McpLogLevel::Debug);
@@ -660,14 +682,27 @@ fn test_mcp_subsystem_builder_and_integration() {
     let store = Arc::new(FlashStore::open(opts).unwrap());
 
     // Setup RAG engine
-    let rag_cfg = flash_store::rag::RagConfigBuilder::new().embedding_dim(16).build();
-    let rag_engine = Arc::new(parking_lot::RwLock::new(flash_store::rag::RagEngine::new(rag_cfg)));
+    let rag_cfg = flash_store::rag::RagConfigBuilder::new()
+        .embedding_dim(16)
+        .build();
+    let rag_engine = Arc::new(parking_lot::RwLock::new(flash_store::rag::RagEngine::new(
+        rag_cfg,
+    )));
 
     // Setup Agent engine
-    let agent_engine = Arc::new(parking_lot::RwLock::new(flash_store::agent::AgentEngine::new("swarm-mcp")));
+    let agent_engine = Arc::new(parking_lot::RwLock::new(
+        flash_store::agent::AgentEngine::new("swarm-mcp"),
+    ));
 
-    let config = McpServerConfigBuilder::new().server_name("flash-subsystem").build();
-    let subsystem = McpSubsystem::build(config, store.clone(), Some(rag_engine.clone()), Some(agent_engine.clone()));
+    let config = McpServerConfigBuilder::new()
+        .server_name("flash-subsystem")
+        .build();
+    let subsystem = McpSubsystem::build(
+        config,
+        store.clone(),
+        Some(rag_engine.clone()),
+        Some(agent_engine.clone()),
+    );
 
     assert!(subsystem.rag_engine().is_some());
     assert!(subsystem.agent_engine().is_some());
@@ -677,14 +712,28 @@ fn test_mcp_subsystem_builder_and_integration() {
     let tools_req = JsonRpcRequest::new(301, "tools/list", None);
     let tools_resp = server.handle_request(tools_req);
     assert!(tools_resp.error.is_none());
-    let tools = tools_resp.result.unwrap().get("tools").unwrap().as_array().unwrap().len();
+    let tools = tools_resp
+        .result
+        .unwrap()
+        .get("tools")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .len();
     assert_eq!(tools, 7); // get, put, delete, scan, stats, rag_query, agent_run
 
     // Test resources list contains flash:// stats, manifest, rag/stats, rag/config, agent/state, agent/agents
     let res_req = JsonRpcRequest::new(302, "resources/list", None);
     let res_resp = server.handle_request(res_req);
     assert!(res_resp.error.is_none());
-    let resources = res_resp.result.unwrap().get("resources").unwrap().as_array().unwrap().len();
+    let resources = res_resp
+        .result
+        .unwrap()
+        .get("resources")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .len();
     assert_eq!(resources, 6);
 
     // Read rag stats resource
@@ -702,4 +751,331 @@ fn test_mcp_subsystem_builder_and_integration() {
         Some(json!({"uri": "flash://agent/state"})),
     ));
     assert!(agent_read.error.is_none());
+}
+
+#[test]
+fn test_mcp_server_error_responses() {
+    let config = McpServerConfigBuilder::new().build();
+    let tools = Arc::new(McpToolRegistry::new());
+    tools.register(Arc::new(DummyEchoTool));
+    let resources = Arc::new(McpResourceRegistry::new());
+    resources.register("flash", Arc::new(DummyStatsResourceProvider));
+    let prompts = Arc::new(McpPromptRegistry::with_standard_prompts());
+    let server = McpServer::with_all(config, tools, resources, prompts);
+
+    // 1. Unknown method
+    let resp = server.handle_request(JsonRpcRequest::new(1, "bogus/method", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::METHOD_NOT_FOUND
+    );
+    assert!(resp
+        .error
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("bogus/method"));
+
+    // 2. Missing initialize params
+    let resp = server.handle_request(JsonRpcRequest::new(2, "initialize", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+    assert_eq!(resp.error.as_ref().unwrap().message, "Invalid params");
+
+    // 3. Malformed initialize params
+    let resp = server.handle_request(JsonRpcRequest::new(
+        3,
+        "initialize",
+        Some(json!({"protocolVersion": 42})),
+    ));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+
+    // 4. Missing tools/call params
+    let resp = server.handle_request(JsonRpcRequest::new(4, "tools/call", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+    assert_eq!(resp.error.as_ref().unwrap().message, "Invalid params");
+
+    // 5. Malformed tools/call params
+    let resp = server.handle_request(JsonRpcRequest::new(
+        5,
+        "tools/call",
+        Some(json!({"arguments": {}})),
+    ));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+
+    // 6. Unknown tool name
+    let resp = server.handle_request(JsonRpcRequest::new(
+        6,
+        "tools/call",
+        Some(json!({"name": "does_not_exist", "arguments": {}})),
+    ));
+    let err = resp.error.as_ref().unwrap();
+    assert_eq!(err.code, mcp_error_codes::INTERNAL_ERROR);
+    assert!(err.message.contains("does_not_exist"));
+
+    // 7. resources/read without uri
+    let resp = server.handle_request(JsonRpcRequest::new(7, "resources/read", Some(json!({}))));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+    assert_eq!(resp.error.as_ref().unwrap().message, "Invalid params");
+
+    // 8. resources/read unknown uri
+    let resp = server.handle_request(JsonRpcRequest::new(
+        8,
+        "resources/read",
+        Some(json!({"uri": "flash://nope"})),
+    ));
+    assert!(resp.error.is_some());
+
+    // 9. prompts/get without params
+    let resp = server.handle_request(JsonRpcRequest::new(9, "prompts/get", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+
+    // 10. prompts/get unknown prompt
+    let resp = server.handle_request(JsonRpcRequest::new(
+        10,
+        "prompts/get",
+        Some(json!({"name": "no_such_prompt"})),
+    ));
+    assert!(resp.error.is_some());
+
+    // 11. logging/setLevel missing level
+    let resp = server.handle_request(JsonRpcRequest::new(11, "logging/setLevel", Some(json!({}))));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+
+    // 12. logging/setLevel unrecognized level
+    let resp = server.handle_request(JsonRpcRequest::new(
+        12,
+        "logging/setLevel",
+        Some(json!({"level": "verbose-ultra"})),
+    ));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::INVALID_PARAMS
+    );
+}
+
+#[test]
+fn test_mcp_server_capability_disabling() {
+    let tools = Arc::new(McpToolRegistry::new());
+    tools.register(Arc::new(DummyEchoTool));
+    let resources = Arc::new(McpResourceRegistry::new());
+    resources.register("flash", Arc::new(DummyStatsResourceProvider));
+
+    // Disable tools, resources, and prompts
+    let config = McpServerConfigBuilder::new()
+        .enable_tools(false)
+        .enable_resources(false)
+        .enable_prompts(false)
+        .build();
+    let prompts = Arc::new(McpPromptRegistry::with_standard_prompts());
+    let server = McpServer::with_all(config, tools.clone(), resources.clone(), prompts);
+
+    let resp = server.handle_request(JsonRpcRequest::new(
+        1,
+        "tools/call",
+        Some(json!({"name": "test_echo", "arguments": {"text": "hi"}})),
+    ));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::SERVER_ERROR_START
+    );
+    assert!(resp.error.as_ref().unwrap().message.contains("disabled"));
+
+    let resp = server.handle_request(JsonRpcRequest::new(2, "resources/list", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::SERVER_ERROR_START
+    );
+
+    let resp = server.handle_request(JsonRpcRequest::new(
+        3,
+        "resources/read",
+        Some(json!({"uri": "flash://stats"})),
+    ));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::SERVER_ERROR_START
+    );
+
+    let resp = server.handle_request(JsonRpcRequest::new(4, "prompts/list", None));
+    assert_eq!(
+        resp.error.as_ref().unwrap().code,
+        mcp_error_codes::SERVER_ERROR_START
+    );
+
+    // Server capabilities should omit disabled features
+    let init_req = JsonRpcRequest::new(
+        5,
+        "initialize",
+        Some(json!({
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "probe", "version": "0.1.0"}
+        })),
+    );
+    let init_resp = server.handle_request(init_req);
+    let caps = init_resp.result.unwrap()["capabilities"].clone();
+    assert!(caps.get("tools").is_none());
+    assert!(caps.get("resources").is_none());
+    assert!(caps.get("prompts").is_none());
+}
+
+#[test]
+fn test_mcp_prompt_argument_validation() {
+    let registry = McpPromptRegistry::with_standard_prompts();
+
+    // Missing required args must error for prompts requiring arguments
+    assert!(registry.render("flash_rag_synthesize", None).is_err());
+    assert!(registry.render("flash_agent_orchestrate", None).is_err());
+
+    // flash_troubleshoot defaults gracefully when no issue is provided
+    let fallback = registry.render("flash_troubleshoot", None).unwrap();
+    assert!(fallback.messages[0]
+        .content
+        .as_text()
+        .unwrap()
+        .contains("Unknown storage issue"));
+
+    // Optional args may be omitted
+    let mut goal_only = std::collections::HashMap::new();
+    goal_only.insert("goal".to_string(), "Ship the release".to_string());
+    let res = registry
+        .render("flash_agent_orchestrate", Some(&goal_only))
+        .expect("optional 'roles' must be optional");
+    let text = res.messages[0].content.as_text().unwrap();
+    assert!(text.contains("Ship the release"));
+    assert!(text.contains("Coder, Reviewer, Tester, Architect"));
+
+    // Unknown prompt
+    assert!(registry.render("no_such_prompt", None).is_err());
+
+    // Unknown extra arguments are ignored rather than rejected
+    let mut extra = std::collections::HashMap::new();
+    extra.insert("goal".to_string(), "Extra args test".to_string());
+    extra.insert("unexpected".to_string(), "ignored".to_string());
+    assert!(registry
+        .render("flash_agent_orchestrate", Some(&extra))
+        .is_ok());
+}
+
+#[test]
+fn test_mcp_resource_registry_aggregation_and_ordering() {
+    struct ProviderA;
+    struct ProviderB;
+
+    impl McpResourceProvider for ProviderA {
+        fn list_resources(&self) -> Vec<McpResourceDefinition> {
+            vec![McpResourceDefinition::new(
+                "flash://z",
+                "Z",
+                "desc z",
+                "text/plain",
+            )]
+        }
+        fn read_resource(&self, uri: &str) -> Result<Vec<McpResourceContent>> {
+            if uri == "flash://z" {
+                Ok(vec![McpResourceContent::text(
+                    "flash://z",
+                    "text/plain",
+                    "z-body",
+                )])
+            } else {
+                Ok(vec![])
+            }
+        }
+    }
+
+    impl McpResourceProvider for ProviderB {
+        fn list_resources(&self) -> Vec<McpResourceDefinition> {
+            vec![McpResourceDefinition::new(
+                "flash://a",
+                "A",
+                "desc a",
+                "text/plain",
+            )]
+        }
+        fn read_resource(&self, uri: &str) -> Result<Vec<McpResourceContent>> {
+            if uri == "flash://a" {
+                Ok(vec![McpResourceContent::text(
+                    "flash://a",
+                    "text/plain",
+                    "a-body",
+                )])
+            } else {
+                Ok(vec![])
+            }
+        }
+    }
+
+    let registry = McpResourceRegistry::new();
+    registry.register("flash", Arc::new(ProviderA));
+    registry.register("flash", Arc::new(ProviderB));
+
+    // Both providers under the same prefix aggregate, sorted by URI
+    let listed = registry.list();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].uri, "flash://a");
+    assert_eq!(listed[1].uri, "flash://z");
+
+    // Reads resolve through the correct provider
+    let a = registry.read("flash://a").unwrap();
+    assert_eq!(a[0].text.as_deref(), Some("a-body"));
+    let z = registry.read("flash://z").unwrap();
+    assert_eq!(z[0].text.as_deref(), Some("z-body"));
+    assert!(registry.read("flash://missing").is_err());
+}
+
+#[test]
+fn test_mcp_tool_registry_replacement_and_count() {
+    struct SecondEcho;
+
+    impl McpToolHandler for SecondEcho {
+        fn definition(&self) -> McpToolDefinition {
+            McpToolDefinition::new("test_echo", "Replacement echo", json!({"type": "object"}))
+        }
+        fn execute(&self, _arguments: Option<serde_json::Value>) -> Result<McpToolResult> {
+            Ok(McpToolResult::success("replacement"))
+        }
+    }
+
+    let registry = McpToolRegistry::new();
+    registry.register(Arc::new(DummyEchoTool));
+    assert_eq!(registry.count(), 1);
+
+    // Re-registering the same name replaces the handler, not the count
+    registry.register(Arc::new(SecondEcho));
+    assert_eq!(registry.count(), 1);
+    assert_eq!(
+        registry.list()[0].description.as_deref(),
+        Some("Replacement echo")
+    );
+
+    let res = registry.call("test_echo", None).unwrap();
+    assert_eq!(res.content[0].as_text().unwrap(), "replacement");
+
+    // Empty registry behaves sanely
+    let empty = McpToolRegistry::new();
+    assert_eq!(empty.count(), 0);
+    assert!(empty.list().is_empty());
+    assert!(empty.call("anything", None).is_err());
 }

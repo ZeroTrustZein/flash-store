@@ -1148,7 +1148,10 @@ pub fn format_mcp_prompts(prompts: &[McpPromptDefinition], format: OutputFormat)
                 println!("(no registered MCP prompt templates)");
                 return;
             }
-            println!("=== Registered MCP Prompt Templates ({}) ===", prompts.len());
+            println!(
+                "=== Registered MCP Prompt Templates ({}) ===",
+                prompts.len()
+            );
             for (i, p) in prompts.iter().enumerate() {
                 println!("{}) Prompt: '{}'", i + 1, p.name);
                 if let Some(desc) = &p.description {
@@ -1200,7 +1203,10 @@ pub fn format_mcp_prompt_result(result: &McpGetPromptResult, format: OutputForma
             if let Some(desc) = &result.description {
                 println!("=== Rendered Prompt: {} ===", desc);
             } else {
-                println!("=== Rendered Prompt Messages ({}) ===", result.messages.len());
+                println!(
+                    "=== Rendered Prompt Messages ({}) ===",
+                    result.messages.len()
+                );
             }
             for (i, m) in result.messages.iter().enumerate() {
                 println!("[Message #{} - Role: {}]", i + 1, m.role);
@@ -1531,7 +1537,10 @@ mod tests {
         let prompt = McpPromptDefinition::new(
             "troubleshoot_lsm",
             "Troubleshoot LSM tree",
-            Some(vec![McpPromptArgument::required("error_message", "Error text")]),
+            Some(vec![McpPromptArgument::required(
+                "error_message",
+                "Error text",
+            )]),
         );
         format_mcp_prompts(&[prompt], OutputFormat::Json);
         format_mcp_prompts(&[], OutputFormat::Text);

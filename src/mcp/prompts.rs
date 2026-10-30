@@ -317,9 +317,9 @@ impl McpPromptRegistry {
         arguments: Option<&HashMap<String, String>>,
     ) -> Result<McpGetPromptResult> {
         let guard = self.prompts.read();
-        let handler = guard
-            .get(name)
-            .ok_or_else(|| FlashStoreError::InvalidArgument(format!("Prompt not found: {}", name)))?;
+        let handler = guard.get(name).ok_or_else(|| {
+            FlashStoreError::InvalidArgument(format!("Prompt not found: {}", name))
+        })?;
         handler.render(arguments)
     }
 }

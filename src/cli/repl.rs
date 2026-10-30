@@ -805,7 +805,8 @@ pub fn execute_mcp_repl(
             .map(|e| Arc::new(parking_lot::RwLock::new(e)))
     };
     let agent_engine = {
-        let mut engine = crate::agent::AgentEngine::new("repl_agent_session").with_store(arc_db.clone());
+        let mut engine =
+            crate::agent::AgentEngine::new("repl_agent_session").with_store(arc_db.clone());
         crate::cli::mcp::seed_standard_agents_in_engine(&mut engine);
         Some(Arc::new(parking_lot::RwLock::new(engine)))
     };
@@ -1223,7 +1224,8 @@ mod tests {
         let mcp_resources = execute_repl_command(&db, &["MCP".into(), "RESOURCES".into()])?;
         assert!(mcp_resources.unwrap().contains("MCP Resources"));
 
-        let mcp_read = execute_repl_command(&db, &["MCP".into(), "READ".into(), "flash://stats".into()])?;
+        let mcp_read =
+            execute_repl_command(&db, &["MCP".into(), "READ".into(), "flash://stats".into()])?;
         assert!(mcp_read.unwrap().contains("stats"));
 
         let mcp_prompts = execute_repl_command(&db, &["MCP".into(), "PROMPTS".into()])?;

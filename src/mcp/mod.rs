@@ -21,9 +21,7 @@ pub use config::{
     McpServerConfig, McpServerConfigBuilder, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
     MCP_PROTOCOL_VERSION,
 };
-pub use handlers::{
-    FlashAgentResourceProvider, FlashRagResourceProvider, McpSubsystem,
-};
+pub use handlers::{FlashAgentResourceProvider, FlashRagResourceProvider, McpSubsystem};
 pub use notifications::{
     CollectingNotificationObserver, LoggingMessageParams, McpNotificationBroadcaster,
     McpNotificationObserver, ResourceUpdatedParams,

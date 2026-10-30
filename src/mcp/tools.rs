@@ -250,19 +250,13 @@ impl McpToolHandler for FlashPutTool {
             FlashStoreError::InvalidArgument("Missing required arguments object".into())
         })?;
 
-        let key = args
-            .get("key")
-            .and_then(|k| k.as_str())
-            .ok_or_else(|| {
-                FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
-            })?;
+        let key = args.get("key").and_then(|k| k.as_str()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required 'key' argument".into())
+        })?;
 
-        let value = args
-            .get("value")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                FlashStoreError::InvalidArgument("Missing required 'value' argument".into())
-            })?;
+        let value = args.get("value").and_then(|v| v.as_str()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required 'value' argument".into())
+        })?;
 
         self.store.put(key, value)?;
 
@@ -415,17 +409,11 @@ impl McpToolHandler for FlashRagQueryTool {
             FlashStoreError::InvalidArgument("Missing required arguments object".into())
         })?;
 
-        let query = args
-            .get("query")
-            .and_then(|q| q.as_str())
-            .ok_or_else(|| {
-                FlashStoreError::InvalidArgument("Missing required 'query' argument".into())
-            })?;
+        let query = args.get("query").and_then(|q| q.as_str()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required 'query' argument".into())
+        })?;
 
-        let top_k = args
-            .get("top_k")
-            .and_then(|t| t.as_u64())
-            .unwrap_or(5) as usize;
+        let top_k = args.get("top_k").and_then(|t| t.as_u64()).unwrap_or(5) as usize;
 
         if let Some(engine) = &self.rag_engine {
             let mut guard = engine.write();
@@ -488,12 +476,9 @@ impl McpToolHandler for FlashAgentRunTool {
                 FlashStoreError::InvalidArgument("Missing required 'task_id' argument".into())
             })?;
 
-        let prompt = args
-            .get("prompt")
-            .and_then(|p| p.as_str())
-            .ok_or_else(|| {
-                FlashStoreError::InvalidArgument("Missing required 'prompt' argument".into())
-            })?;
+        let prompt = args.get("prompt").and_then(|p| p.as_str()).ok_or_else(|| {
+            FlashStoreError::InvalidArgument("Missing required 'prompt' argument".into())
+        })?;
 
         let priority_str = args
             .get("priority")
@@ -525,10 +510,13 @@ impl McpToolHandler for FlashAgentRunTool {
             Ok(McpToolResult::success(response.to_string()))
         } else {
             let mut standalone = crate::agent::AgentEngine::new(format!("mcp-{}", task_id));
-            let agent = crate::agent::AgentDefinition::builder("mcp-worker", crate::agent::AgentRole::Coder)
-                .capability(crate::agent::AgentCapability::TextGeneration)
-                .capability(crate::agent::AgentCapability::ToolCalling)
-                .build();
+            let agent = crate::agent::AgentDefinition::builder(
+                "mcp-worker",
+                crate::agent::AgentRole::Coder,
+            )
+            .capability(crate::agent::AgentCapability::TextGeneration)
+            .capability(crate::agent::AgentCapability::ToolCalling)
+            .build();
             standalone.register_agent(agent);
 
             let task = crate::agent::AgentTask::builder(task_id, prompt)
