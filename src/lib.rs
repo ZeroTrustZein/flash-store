@@ -13,6 +13,7 @@
 //! - **Manifest & Versioning**: ACID version edits tracking SSTable level assignments across crash recoveries.
 //! - **RAG & Reranker Subsystem**: Native hybrid BM25/vector retrieval, cross-encoder reranking, semantic caching, and LLM context assembly.
 //! - **Multi-Agent Workflow Subsystem**: Autonomous task graph orchestration, adaptive routing, stateful reflection loops, dynamic tool calling, episodic memory, and telemetry.
+//! - **Model Context Protocol (MCP) Subsystem**: Native JSON-RPC 2.0 endpoints exposing LSM storage, RAG search, and agent swarm tools/resources/prompts to LLM host clients.
 //!
 //! ## Quick Start
 //!
@@ -101,6 +102,56 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ## Model Context Protocol (MCP) Server Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! # let dir = tempfile::tempdir().unwrap();
+//! let store_opts = OptionsBuilder::new().dir(dir.path()).build();
+//! let db = Arc::new(FlashStore::open(store_opts)?);
+//!
+//! let mcp_config = McpServerConfigBuilder::new()
+//!     .server_name("flash-embedded-mcp")
+//!     .enable_tools(true)
+//!     .enable_resources(true)
+//!     .enable_prompts(true)
+//!     .build();
+//!
+//! let subsystem = McpSubsystem::build(mcp_config, db, None, None);
+//!
+//! let (client, server_transport) = MockMcpTransport::create_channel_pair();
+//! let server = subsystem.server().clone();
+//! let server_transport_clone = server_transport.clone();
+//! let handle = std::thread::spawn(move || {
+//!     let _ = server.serve(&*server_transport_clone);
+//! });
+//!
+//! let init_req = JsonRpcRequest::new(
+//!     "req-1",
+//!     "initialize",
+//!     Some(serde_json::to_value(InitializeParams {
+//!         protocol_version: MCP_PROTOCOL_VERSION.to_string(),
+//!         capabilities: Default::default(),
+//!         client_info: Implementation {
+//!             name: "mcp-quickstart".to_string(),
+//!             version: "1.0.0".to_string(),
+//!         },
+//!     })?),
+//! );
+//! client.send_request(init_req)?;
+//! let init_resp = client.receive_response()?;
+//! assert!(init_resp.result.is_some());
+//!
+//! drop(client);
+//! server_transport.close();
+//! let _ = handle.join();
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod agent;
 pub mod batch;
@@ -112,6 +163,7 @@ pub mod engine;
 pub mod error;
 pub mod iterator;
 pub mod manifest;
+pub mod mcp;
 pub mod memtable;
 pub mod rag;
 pub mod sstable;
@@ -139,13 +191,32 @@ pub use agent::{
 pub use batch::WriteBatch;
 pub use cache::{BlockCache, LruBlockCache};
 pub use cli::{
-    open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+    open_agent_pipeline, open_mcp_subsystem, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, McpCmd,
+    OutputFormat, RagCmd,
 };
 pub use compaction::{CompactionTask, Compactor};
 pub use config::{Options, OptionsBuilder};
 pub use engine::{FlashStore, Stats};
 pub use error::{FlashStoreError, Result};
 pub use iterator::{MemtableIterator, MergingIterator, SSTableIterator, StorageIterator};
+pub use mcp::{
+    mcp_error_codes, ClientCapabilities, CollectingNotificationObserver,
+    FlashAgentOrchestratePrompt, FlashAgentResourceProvider, FlashAgentRunTool, FlashDeleteTool,
+    FlashGetTool, FlashPutTool, FlashRagQueryTool, FlashRagResourceProvider,
+    FlashRagSynthesizePrompt, FlashScanTool, FlashStatsTool, FlashStorageResourceProvider,
+    FlashTroubleshootPrompt, Implementation, InitializeParams, InitializeResult, JsonRpcError,
+    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability, LoggingMessageParams,
+    McpContent, McpGetPromptParams, McpGetPromptResult, McpListPromptsResult,
+    McpListResourcesResult, McpListToolsResult, McpLogLevel, McpNotificationBroadcaster,
+    McpNotificationObserver, McpPromptArgument, McpPromptDefinition, McpPromptHandler,
+    McpPromptMessage, McpPromptRegistry, McpReadResourceResult, McpResourceContent,
+    McpResourceDefinition, McpResourceProvider, McpResourceRegistry, McpServer, McpServerConfig,
+    McpServerConfigBuilder, McpSubsystem, McpToolCallParams, McpToolDefinition, McpToolHandler,
+    McpToolRegistry, McpToolResult, McpTransport, MockMcpClientSide, MockMcpTransport,
+    PromptsCapability, RequestId, ResourceUpdatedParams, ResourcesCapability, ServerCapabilities,
+    StandardToolSchemas, StdioTransport, ToolsCapability, DEFAULT_SERVER_NAME,
+    DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+};
 pub use rag::{
     borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,
     euclidean_distance, filter_min_score, maximal_marginal_relevance, reciprocal_rank_fusion,
@@ -192,7 +263,8 @@ pub mod prelude {
     pub use crate::batch::WriteBatch;
     pub use crate::cache::{BlockCache, LruBlockCache};
     pub use crate::cli::{
-        open_agent_pipeline, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts, OutputFormat, RagCmd,
+        open_agent_pipeline, open_mcp_subsystem, open_rag_pipeline, AgentCmd, Cmd, GlobalOpts,
+        McpCmd, OutputFormat, RagCmd,
     };
     pub use crate::compaction::{CompactionTask, Compactor};
     pub use crate::config::{Options, OptionsBuilder};
@@ -200,6 +272,25 @@ pub mod prelude {
     pub use crate::error::{FlashStoreError, Result};
     pub use crate::iterator::{
         MemtableIterator, MergingIterator, SSTableIterator, StorageIterator,
+    };
+    pub use crate::mcp::{
+        mcp_error_codes, ClientCapabilities, CollectingNotificationObserver,
+        FlashAgentOrchestratePrompt, FlashAgentResourceProvider, FlashAgentRunTool,
+        FlashDeleteTool, FlashGetTool, FlashPutTool, FlashRagQueryTool, FlashRagResourceProvider,
+        FlashRagSynthesizePrompt, FlashScanTool, FlashStatsTool, FlashStorageResourceProvider,
+        FlashTroubleshootPrompt, Implementation, InitializeParams, InitializeResult, JsonRpcError,
+        JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LoggingCapability,
+        LoggingMessageParams, McpContent, McpGetPromptParams, McpGetPromptResult,
+        McpListPromptsResult, McpListResourcesResult, McpListToolsResult, McpLogLevel,
+        McpNotificationBroadcaster, McpNotificationObserver, McpPromptArgument,
+        McpPromptDefinition, McpPromptHandler, McpPromptMessage, McpPromptRegistry,
+        McpReadResourceResult, McpResourceContent, McpResourceDefinition, McpResourceProvider,
+        McpResourceRegistry, McpServer, McpServerConfig, McpServerConfigBuilder, McpSubsystem,
+        McpToolCallParams, McpToolDefinition, McpToolHandler, McpToolRegistry, McpToolResult,
+        McpTransport, MockMcpClientSide, MockMcpTransport, PromptsCapability, RequestId,
+        ResourceUpdatedParams, ResourcesCapability, ServerCapabilities, StandardToolSchemas,
+        StdioTransport, ToolsCapability, DEFAULT_SERVER_NAME, DEFAULT_SERVER_VERSION,
+        MCP_PROTOCOL_VERSION,
     };
     pub use crate::rag::{
         borda_count_fusion, chunk_document, chunk_text, cosine_similarity, dot_product,

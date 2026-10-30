@@ -4,6 +4,10 @@ use crate::agent::{
 };
 use crate::cli::OutputFormat;
 use crate::engine::Stats;
+use crate::mcp::{
+    McpContent, McpGetPromptResult, McpPromptDefinition, McpResourceContent, McpResourceDefinition,
+    McpToolDefinition, McpToolResult,
+};
 use crate::rag::{Document, EvaluationSummary, PipelineQueryResult, RagEngine, ScoredDocument};
 use crate::types::{Key, Value};
 use serde_json::json;
@@ -936,6 +940,321 @@ pub fn format_agent_metrics(metrics: &AgentMetricsSnapshot, format: OutputFormat
     }
 }
 
+/// Format and print list of registered MCP tools.
+pub fn format_mcp_tools(tools: &[McpToolDefinition], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(tools).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("name\tdescription\thas_input_schema");
+            for t in tools {
+                let has_schema = !t.input_schema.is_null();
+                println!(
+                    "{}\t{}\t{}",
+                    t.name,
+                    t.description.as_deref().unwrap_or("-"),
+                    has_schema
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if tools.is_empty() {
+                println!("(no registered MCP tools)");
+                return;
+            }
+            println!("=== Registered MCP Tools ({}) ===", tools.len());
+            for (i, t) in tools.iter().enumerate() {
+                println!("{}) Tool: '{}'", i + 1, t.name);
+                if let Some(desc) = &t.description {
+                    println!("   Description: {}", desc);
+                }
+                if !t.input_schema.is_null() {
+                    let schema_str = serde_json::to_string(&t.input_schema).unwrap_or_default();
+                    println!("   Input Schema: {}", safe_truncate_str(&schema_str, 80));
+                }
+            }
+        }
+    }
+}
+
+/// Format and print output of an MCP tool execution.
+pub fn format_mcp_tool_result(result: &McpToolResult, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("is_error\tcontent_type\tcontent_text");
+            let err = result.is_error.unwrap_or(false);
+            for c in &result.content {
+                match c {
+                    McpContent::Text { text } => {
+                        println!("{}\ttext\t{}", err, text.replace('\n', " "));
+                    }
+                    McpContent::Image { mime_type, .. } => {
+                        println!("{}\timage\t[{} image data]", err, mime_type);
+                    }
+                    McpContent::Resource { resource } => {
+                        println!("{}\tresource\t{}", err, resource);
+                    }
+                }
+            }
+        }
+        OutputFormat::Text => {
+            let status = if result.is_error.unwrap_or(false) {
+                "ERROR"
+            } else {
+                "SUCCESS"
+            };
+            println!("=== MCP Tool Execution [{}] ===", status);
+            for (i, c) in result.content.iter().enumerate() {
+                match c {
+                    McpContent::Text { text } => {
+                        if result.content.len() > 1 {
+                            println!("[Content #{}]\n{}", i + 1, text);
+                        } else {
+                            println!("{}", text);
+                        }
+                    }
+                    McpContent::Image { mime_type, data } => {
+                        println!(
+                            "[Image Content #{}: {} ({} bytes base64)]",
+                            i + 1,
+                            mime_type,
+                            data.len()
+                        );
+                    }
+                    McpContent::Resource { resource } => {
+                        println!("[Embedded Resource #{}]\n{}", i + 1, resource);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Format and print list of available MCP resources.
+pub fn format_mcp_resources(resources: &[McpResourceDefinition], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(resources).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("uri\tname\tmime_type\tdescription");
+            for r in resources {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    r.uri,
+                    r.name,
+                    r.mime_type.as_deref().unwrap_or("-"),
+                    r.description.as_deref().unwrap_or("-")
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if resources.is_empty() {
+                println!("(no available MCP resources)");
+                return;
+            }
+            println!("=== Available MCP Resources ({}) ===", resources.len());
+            for (i, r) in resources.iter().enumerate() {
+                let mime = r.mime_type.as_deref().unwrap_or("unknown");
+                println!("{}) Resource: [{}] ({})", i + 1, r.name, mime);
+                println!("   URI:         {}", r.uri);
+                if let Some(desc) = &r.description {
+                    println!("   Description: {}", desc);
+                }
+            }
+        }
+    }
+}
+
+/// Format and print content of an MCP resource.
+pub fn format_mcp_resource_contents(contents: &[McpResourceContent], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(contents).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("uri\tmime_type\ttext_or_blob");
+            for c in contents {
+                let mime = c.mime_type.as_deref().unwrap_or("-");
+                let body = if let Some(txt) = &c.text {
+                    txt.replace('\n', " ")
+                } else if let Some(b) = &c.blob {
+                    format!("[blob {} bytes]", b.len())
+                } else {
+                    "-".into()
+                };
+                println!("{}\t{}\t{}", c.uri, mime, body);
+            }
+        }
+        OutputFormat::Text => {
+            if contents.is_empty() {
+                println!("(empty resource content)");
+                return;
+            }
+            for (i, c) in contents.iter().enumerate() {
+                let mime = c.mime_type.as_deref().unwrap_or("text/plain");
+                println!("=== Resource Content #{}: {} [{}] ===", i + 1, c.uri, mime);
+                if let Some(txt) = &c.text {
+                    println!("{}", txt);
+                } else if let Some(b) = &c.blob {
+                    println!("[Binary blob: {} base64 chars]", b.len());
+                } else {
+                    println!("(null content)");
+                }
+            }
+        }
+    }
+}
+
+/// Format and print list of registered MCP prompts.
+pub fn format_mcp_prompts(prompts: &[McpPromptDefinition], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(prompts).unwrap_or_else(|_| "[]".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("name\tdescription\targuments_count");
+            for p in prompts {
+                let args_len = p.arguments.as_ref().map(|a| a.len()).unwrap_or(0);
+                println!(
+                    "{}\t{}\t{}",
+                    p.name,
+                    p.description.as_deref().unwrap_or("-"),
+                    args_len
+                );
+            }
+        }
+        OutputFormat::Text => {
+            if prompts.is_empty() {
+                println!("(no registered MCP prompt templates)");
+                return;
+            }
+            println!(
+                "=== Registered MCP Prompt Templates ({}) ===",
+                prompts.len()
+            );
+            for (i, p) in prompts.iter().enumerate() {
+                println!("{}) Prompt: '{}'", i + 1, p.name);
+                if let Some(desc) = &p.description {
+                    println!("   Description: {}", desc);
+                }
+                if let Some(args) = &p.arguments {
+                    if !args.is_empty() {
+                        let arg_strs: Vec<String> = args
+                            .iter()
+                            .map(|a| {
+                                let req = if a.required.unwrap_or(false) { "*" } else { "" };
+                                format!("{}{}", a.name, req)
+                            })
+                            .collect();
+                        println!("   Arguments:   {}", arg_strs.join(", "));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Format and print result of an MCP get-prompt call.
+pub fn format_mcp_prompt_result(result: &McpGetPromptResult, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            println!("role\tcontent_type\tcontent");
+            for m in &result.messages {
+                match &m.content {
+                    McpContent::Text { text } => {
+                        println!("{}\ttext\t{}", m.role, text.replace('\n', " "));
+                    }
+                    McpContent::Image { mime_type, .. } => {
+                        println!("{}\timage\t[{} image]", m.role, mime_type);
+                    }
+                    McpContent::Resource { resource } => {
+                        println!("{}\tresource\t{}", m.role, resource);
+                    }
+                }
+            }
+        }
+        OutputFormat::Text => {
+            if let Some(desc) = &result.description {
+                println!("=== Rendered Prompt: {} ===", desc);
+            } else {
+                println!(
+                    "=== Rendered Prompt Messages ({}) ===",
+                    result.messages.len()
+                );
+            }
+            for (i, m) in result.messages.iter().enumerate() {
+                println!("[Message #{} - Role: {}]", i + 1, m.role);
+                match &m.content {
+                    McpContent::Text { text } => {
+                        println!("{}", text);
+                    }
+                    McpContent::Image { mime_type, .. } => {
+                        println!("[Image: {}]", mime_type);
+                    }
+                    McpContent::Resource { resource } => {
+                        println!("[Resource: {}]", resource);
+                    }
+                }
+                println!();
+            }
+        }
+    }
+}
+
+/// Format and print MCP server info and capabilities.
+pub fn format_mcp_server_info(info: &serde_json::Value, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(info).unwrap_or_else(|_| "{}".into())
+            );
+        }
+        OutputFormat::Tsv => {
+            if let Some(obj) = info.as_object() {
+                println!("metric\tvalue");
+                for (k, v) in obj {
+                    println!("{}\t{}", k, v);
+                }
+            }
+        }
+        OutputFormat::Text => {
+            println!("=== FlashStore MCP Server Information ===");
+            if let Some(obj) = info.as_object() {
+                for (k, v) in obj {
+                    println!("{:<24} {}", format!("{}:", k), v);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1170,5 +1489,77 @@ mod tests {
         format_agent_metrics(&metrics, OutputFormat::Json);
         format_agent_metrics(&metrics, OutputFormat::Tsv);
         format_agent_metrics(&metrics, OutputFormat::Text);
+    }
+
+    #[test]
+    fn test_format_mcp_structures() {
+        use crate::mcp::{McpPromptArgument, McpPromptMessage};
+
+        let tools = vec![McpToolDefinition::new(
+            "flash_get",
+            "Get key",
+            json!({"type": "object", "properties": {"key": {"type": "string"}}}),
+        )];
+        format_mcp_tools(&tools, OutputFormat::Json);
+        format_mcp_tools(&tools, OutputFormat::Tsv);
+        format_mcp_tools(&tools, OutputFormat::Text);
+        format_mcp_tools(&[], OutputFormat::Text);
+
+        let result = McpToolResult::success("val1");
+        format_mcp_tool_result(&result, OutputFormat::Json);
+        format_mcp_tool_result(&result, OutputFormat::Tsv);
+        format_mcp_tool_result(&result, OutputFormat::Text);
+
+        let err_result = McpToolResult::error("Key not found");
+        format_mcp_tool_result(&err_result, OutputFormat::Text);
+
+        let resources = vec![McpResourceDefinition::new(
+            "flash://storage/stats",
+            "Storage Stats",
+            "Telemetry",
+            "application/json",
+        )];
+        format_mcp_resources(&resources, OutputFormat::Json);
+        format_mcp_resources(&resources, OutputFormat::Tsv);
+        format_mcp_resources(&resources, OutputFormat::Text);
+        format_mcp_resources(&[], OutputFormat::Text);
+
+        let contents = vec![McpResourceContent::text(
+            "flash://storage/stats",
+            "application/json",
+            "{\"keys\": 10}",
+        )];
+        format_mcp_resource_contents(&contents, OutputFormat::Json);
+        format_mcp_resource_contents(&contents, OutputFormat::Tsv);
+        format_mcp_resource_contents(&contents, OutputFormat::Text);
+        format_mcp_resource_contents(&[], OutputFormat::Text);
+
+        let prompt = McpPromptDefinition::new(
+            "troubleshoot_lsm",
+            "Troubleshoot LSM tree",
+            Some(vec![McpPromptArgument::required(
+                "error_message",
+                "Error text",
+            )]),
+        );
+        format_mcp_prompts(&[prompt], OutputFormat::Json);
+        format_mcp_prompts(&[], OutputFormat::Text);
+
+        let prompt_result = McpGetPromptResult {
+            description: Some("Guided debug".into()),
+            messages: vec![McpPromptMessage::user("Please analyze error")],
+        };
+        format_mcp_prompt_result(&prompt_result, OutputFormat::Json);
+        format_mcp_prompt_result(&prompt_result, OutputFormat::Tsv);
+        format_mcp_prompt_result(&prompt_result, OutputFormat::Text);
+
+        let info = json!({
+            "server_name": "flash-store-mcp",
+            "server_version": "0.1.0",
+            "tools_count": 5
+        });
+        format_mcp_server_info(&info, OutputFormat::Json);
+        format_mcp_server_info(&info, OutputFormat::Tsv);
+        format_mcp_server_info(&info, OutputFormat::Text);
     }
 }

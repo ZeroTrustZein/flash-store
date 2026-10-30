@@ -3,8 +3,8 @@ use flash_store::cli::batch_parser::{parse_json_ops, parse_plain_lines};
 use flash_store::cli::formatter::{format_kv_pairs, format_stats};
 use flash_store::cli::repl::{execute_repl_command, tokenize_line};
 use flash_store::cli::{
-    open_agent_pipeline, open_db, open_rag_pipeline, run, AgentCmd, Cmd, GlobalOpts, OutputFormat,
-    RagCmd,
+    open_agent_pipeline, open_db, open_mcp_subsystem, open_rag_pipeline, run, AgentCmd, Cmd,
+    GlobalOpts, McpCmd, OutputFormat, RagCmd,
 };
 use flash_store::config::OptionsBuilder;
 use flash_store::engine::{FlashStore, Stats};
@@ -1385,6 +1385,484 @@ fn test_cli_agent_error_handling_and_validation() -> Result<()> {
 
     let res = execute_repl_command(&db, &["AGENT".into(), "MEMORY".into()]);
     assert!(res.is_err());
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_mcp_tools_and_call_lifecycle() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. List tools in all formats
+    for fmt in ["text", "json", "tsv"] {
+        run(
+            Cmd::Mcp {
+                command: McpCmd::Tools { format: fmt.into() },
+            },
+            &opts,
+        )?;
+    }
+
+    // 2. Call flash_put tool
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_put".into(),
+                args: Some(r#"{"key": "mcp_k1", "value": "mcp_v1"}"#.into()),
+                file: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 3. Call flash_get tool
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_get".into(),
+                args: Some(r#"{"key": "mcp_k1"}"#.into()),
+                file: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 4. Verify directly in DB
+    {
+        let db = open_db(&opts)?;
+        assert_eq!(
+            db.get(Bytes::from_static(b"mcp_k1"))?,
+            Some(Bytes::from_static(b"mcp_v1"))
+        );
+    }
+
+    // 5. Call flash_scan tool
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_scan".into(),
+                args: Some(r#"{"start": "mcp_k1", "limit": 5}"#.into()),
+                file: None,
+                format: "tsv".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 6. Call flash_stats tool
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_stats".into(),
+                args: None,
+                file: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 7. Call flash_put with args from file
+    let args_file = dir.path().join("put_args.json");
+    fs::write(
+        &args_file,
+        r#"{"key": "file_key", "value": "file_value_content"}"#,
+    )
+    .unwrap();
+
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_put".into(),
+                args: None,
+                file: Some(args_file),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    {
+        let db = open_db(&opts)?;
+        assert_eq!(
+            db.get(Bytes::from_static(b"file_key"))?,
+            Some(Bytes::from_static(b"file_value_content"))
+        );
+    }
+
+    // 8. Call flash_delete tool
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_delete".into(),
+                args: Some(r#"{"key": "mcp_k1"}"#.into()),
+                file: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    {
+        let db = open_db(&opts)?;
+        assert_eq!(db.get(Bytes::from_static(b"mcp_k1"))?, None);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_mcp_resources_and_prompts_lifecycle() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. List resources in all formats
+    for fmt in ["text", "json", "tsv"] {
+        run(
+            Cmd::Mcp {
+                command: McpCmd::Resources { format: fmt.into() },
+            },
+            &opts,
+        )?;
+    }
+
+    // 2. Read resources
+    for uri in ["flash://stats", "flash://manifest"] {
+        for fmt in ["text", "json"] {
+            run(
+                Cmd::Mcp {
+                    command: McpCmd::Read {
+                        uri: uri.into(),
+                        format: fmt.into(),
+                    },
+                },
+                &opts,
+            )?;
+        }
+    }
+
+    // 3. List prompts in all formats
+    for fmt in ["text", "json", "tsv"] {
+        run(
+            Cmd::Mcp {
+                command: McpCmd::Prompts { format: fmt.into() },
+            },
+            &opts,
+        )?;
+    }
+
+    // 4. Get prompt flash_troubleshoot
+    run(
+        Cmd::Mcp {
+            command: McpCmd::GetPrompt {
+                name: "flash_troubleshoot".into(),
+                args: Some(
+                    r#"{"issue": "Corruption in sstable block 000001", "component": "sstable"}"#
+                        .into(),
+                ),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 5. Get prompt flash_agent_orchestrate
+    run(
+        Cmd::Mcp {
+            command: McpCmd::GetPrompt {
+                name: "flash_agent_orchestrate".into(),
+                args: Some(r#"{"goal": "Implement asynchronous background flush", "roles": "planner,coder"}"#.into()),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_mcp_info_and_request() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Info in all formats
+    for fmt in ["text", "json", "tsv"] {
+        run(
+            Cmd::Mcp {
+                command: McpCmd::Info { format: fmt.into() },
+            },
+            &opts,
+        )?;
+    }
+
+    // Verify open_mcp_subsystem helper directly
+    let sub = open_mcp_subsystem(&opts)?;
+    assert_eq!(sub.server().config().server_name, "flash-store-mcp");
+
+    // 2. Request ping via --json
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Request {
+                json: Some(r#"{"jsonrpc":"2.0","id":100,"method":"ping"}"#.into()),
+                file: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 3. Request initialize via --json
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Request {
+                json: Some(
+                    r#"{
+                    "jsonrpc": "2.0",
+                    "id": "init_1",
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test-client", "version": "1.0.0"}
+                    }
+                }"#
+                    .into(),
+                ),
+                file: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    // 4. Request tools/list via --file
+    let req_file = dir.path().join("tools_list_req.json");
+    fs::write(
+        &req_file,
+        r#"{"jsonrpc": "2.0", "id": 101, "method": "tools/list"}"#,
+    )
+    .unwrap();
+
+    run(
+        Cmd::Mcp {
+            command: McpCmd::Request {
+                json: None,
+                file: Some(req_file),
+                format: "json".into(),
+            },
+        },
+        &opts,
+    )?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_mcp_error_handling_and_validation() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let opts = GlobalOpts {
+        path: dir.path().to_path_buf(),
+        quiet: true,
+        ..Default::default()
+    };
+
+    // 1. Call non-existent tool
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "non_existent_tool_xyz".into(),
+                args: None,
+                file: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 2. Call tool with invalid JSON
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::Call {
+                name: "flash_get".into(),
+                args: Some("invalid json string".into()),
+                file: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 3. Read non-existent resource
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::Read {
+                uri: "flash://non_existent_uri".into(),
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 4. Get non-existent prompt
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::GetPrompt {
+                name: "unknown_prompt_xyz".into(),
+                args: None,
+                format: "text".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 5. Request without JSON or file
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::Request {
+                json: None,
+                file: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 6. Request with malformed JSON
+    let res = run(
+        Cmd::Mcp {
+            command: McpCmd::Request {
+                json: Some("malformed json {]".into()),
+                file: None,
+                format: "json".into(),
+            },
+        },
+        &opts,
+    );
+    assert!(res.is_err());
+
+    // 7. REPL invalid MCP subcommands
+    let db = open_db(&opts)?;
+    let res = execute_repl_command(&db, &["MCP".into(), "UNKNOWN_SUB".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["MCP".into(), "CALL".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["MCP".into(), "READ".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["MCP".into(), "GET-PROMPT".into()]);
+    assert!(res.is_err());
+
+    let res = execute_repl_command(&db, &["MCP".into(), "REQ".into()]);
+    assert!(res.is_err());
+
+    Ok(())
+}
+
+#[test]
+fn test_repl_mcp_full_session() -> Result<()> {
+    let dir = tempdir().unwrap();
+    let options = OptionsBuilder::new().dir(dir.path()).build();
+    let db = FlashStore::open(options)?;
+
+    // 1. MCP TOOLS
+    let res = execute_repl_command(&db, &["MCP".into(), "TOOLS".into()])?;
+    assert!(res.unwrap().contains("=== MCP Tools"));
+
+    // 2. MCP CALL flash_put
+    let res = execute_repl_command(
+        &db,
+        &[
+            "MCP".into(),
+            "CALL".into(),
+            "flash_put".into(),
+            r#"{"key": "repl_mcp_key", "value": "repl_mcp_val"}"#.into(),
+        ],
+    )?;
+    assert!(res.unwrap().contains("SUCCESS"));
+
+    // 3. MCP CALL flash_get
+    let res = execute_repl_command(
+        &db,
+        &[
+            "MCP".into(),
+            "CALL".into(),
+            "flash_get".into(),
+            r#"{"key": "repl_mcp_key"}"#.into(),
+        ],
+    )?;
+    assert!(res.unwrap().contains("repl_mcp_val"));
+
+    // 4. MCP RESOURCES
+    let res = execute_repl_command(&db, &["MCP".into(), "RESOURCES".into()])?;
+    assert!(res.unwrap().contains("=== MCP Resources"));
+
+    // 5. MCP READ
+    let res = execute_repl_command(&db, &["MCP".into(), "READ".into(), "flash://stats".into()])?;
+    assert!(res.unwrap().contains("active_memtable_size_bytes"));
+
+    // 6. MCP PROMPTS
+    let res = execute_repl_command(&db, &["MCP".into(), "PROMPTS".into()])?;
+    assert!(res.unwrap().contains("flash_troubleshoot"));
+
+    // 7. MCP GET-PROMPT
+    let res = execute_repl_command(
+        &db,
+        &[
+            "MCP".into(),
+            "GET-PROMPT".into(),
+            "flash_troubleshoot".into(),
+            r#"{"issue": "test corruption"}"#.into(),
+        ],
+    )?;
+    assert!(res.unwrap().contains("test corruption"));
+
+    // 8. MCP INFO / STATUS / PING
+    let res = execute_repl_command(&db, &["MCP".into(), "INFO".into()])?;
+    assert!(res.unwrap().contains("FlashStore MCP Server"));
+
+    let res = execute_repl_command(&db, &["MCP".into(), "STATUS".into()])?;
+    assert!(res.unwrap().contains("Protocol:"));
+
+    let res = execute_repl_command(&db, &["MCP".into(), "PING".into()])?;
+    assert!(res.unwrap().contains("Server:"));
+
+    // 9. MCP REQ
+    let res = execute_repl_command(
+        &db,
+        &[
+            "MCP".into(),
+            "REQ".into(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.into(),
+        ],
+    )?;
+    assert!(res.unwrap().contains("result"));
+
+    // 10. MCP prefix alias: MCP-TOOLS
+    let res = execute_repl_command(&db, &["MCP-TOOLS".into()])?;
+    assert!(res.unwrap().contains("=== MCP Tools"));
 
     Ok(())
 }

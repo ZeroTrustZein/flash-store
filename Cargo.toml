@@ -32,6 +32,10 @@ path = "src/lib.rs"
 name = "flash-cli"
 path = "src/bin/flash_cli.rs"
 
+[[bin]]
+name = "flash-mcp"
+path = "src/bin/flash_mcp.rs"
+
 [[bench]]
 name = "benchmarks"
 path = "benches/benchmarks.rs"

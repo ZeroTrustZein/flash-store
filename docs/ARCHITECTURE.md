@@ -10,6 +10,34 @@
 
 ```
 +========================================================================+
+|                       MCP HOST / CLIENT APPLICATION                    |
+|           (Claude Desktop, Cursor, OpenCode, Custom Agents)            |
++========================================================================+
+                                    |
+                         Standard I/O (stdin / stdout)
+                         or In-Memory Channel Transport
+                         JSON-RPC 2.0 Protocol Framing
+                                    |
+                                    v
++========================================================================+
+|             LAYER 4: MODEL CONTEXT PROTOCOL (MCP) SUBSYSTEM            |
+|                                                                        |
+|  +--------------------+  +--------------------+  +------------------+  |
+|  |   Tool Registry    |  | Resource Registry  |  | Prompt Registry  |  |
+|  | (Storage/RAG/Agent)|  | (Stats/Manifest/Wf)|  | (Troubleshoot/RAG|  |
+|  +---------+----------+  +---------+----------+  +--------+---------+  |
+|            |                       |                      |            |
+|            +-----------------------+----------------------+            |
+|                                    |                                   |
+|                      +-------------v--------------+                    |
+|                      |      McpServer Runtime     |                    |
+|                      |  (Handlers & Notifications)|                    |
+|                      +-------------+--------------+                    |
++====================================|===================================+
+                                     |
+       +-----------------------------+-----------------------------+
+       v                             v                             v
++========================================================================+
 |             LAYER 3: AUTONOMOUS MULTI-AGENT SWARM SUBSYSTEM            |
 |                                                                        |
 |    DAG Task Graphs   ──>  Adaptive Router      ──>  Reflection Engine  |
@@ -288,8 +316,41 @@ For deep technical specifications, mathematical scoring formulations, and tool c
 
 ---
 
-## 8. Subsystem Technical Guides
+## 8. Model Context Protocol (MCP) Subsystem (Layer 4)
 
+Layer 4 provides an embedded Model Context Protocol (MCP) server adhering to protocol specification `2024-11-05`. It exposes FlashStore's storage primitives, RAG retrieval engine, and multi-agent swarm workflows over a uniform JSON-RPC 2.0 communication bus.
+
+### 8.1 Tool Registry & Execution
+- **Storage Primitives**: `flash_get`, `flash_put`, `flash_delete`, `flash_scan`, `flash_stats`.
+- **RAG Subsystem**: `flash_rag_query` for hybrid dense/sparse vector retrieval with cross-encoder scoring.
+- **Agent Orchestrator**: `flash_agent_run` for submitting and driving multi-agent workflows.
+- All tools declare strict input schemas validated via JSON Schema Draft 7.
+
+### 8.2 Inspectable Resources
+Dynamic URI endpoints exposing real-time engine telemetry and diagnostics:
+- `flash://stats`: MemTable byte sizes, immutable count, SSTable level distribution.
+- `flash://manifest`: VersionSet status and multi-tier SSTable distribution.
+- `flash://rag/stats` & `flash://rag/config`: RAG index size, cache hit/miss rates, and active hyperparameters.
+- `flash://agent/state` & `flash://agent/agents`: Autonomous swarm task counts, blackboard state, and agent capabilities.
+
+### 8.3 Prompt Templates & Dynamic Synthesis
+Structured templates for client LLMs:
+- `flash_troubleshoot`: Expert systems engineering diagnostic prompt for LSM-tree anomalies.
+- `flash_rag_synthesize`: Context-grounded citation-aware answer synthesis prompt.
+- `flash_agent_orchestrate`: Task decomposition and agent delegation prompt.
+
+### 8.4 Transport & Notification Broadcasting
+- **Stdio Transport**: Line-delimited JSON-RPC 2.0 over standard I/O for Claude Desktop, OpenCode, and Cursor.
+- **In-Memory Channel Transport**: High-throughput crossbeam-channel transport for tests and embedded applications.
+- **Notification Broadcaster**: Pub/sub engine streaming log messages (`notifications/message`) across 8 syslog-aligned log levels and resource updates (`notifications/resources/updated`).
+
+For deep technical specifications, protocol framing, and client configuration guides, see the [MCP Server & Tool Architecture Guide](MCP_SERVER.md).
+
+---
+
+## 9. Subsystem Technical Guides
+
+- 🔌 **[Model Context Protocol (MCP) Architecture Guide](MCP_SERVER.md)**: JSON-RPC 2.0 framing, tool catalog, resource URIs, and prompt templates.
 - 🤖 **[Multi-Agent Swarm Architecture Guide](AGENT_WORKFLOW.md)**: Task graphs, adaptive routing, reflection loops, tools, and episodic memory.
 - 🧠 **[RAG & Reranker Architecture Guide](RAG_RERANKER.md)**: Hybrid BM25/vector search, Reciprocal Rank Fusion, cross-encoders, and semantic caching.
 - 💾 **[SSTable Binary Format Specification](SSTABLE_FORMAT.md)**: Data blocks, Bloom filters, index blocks, and 48-byte footers.

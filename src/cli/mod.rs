@@ -2,10 +2,12 @@ pub mod agent;
 pub mod batch_parser;
 pub mod formatter;
 pub mod inspect;
+pub mod mcp;
 pub mod rag;
 pub mod repl;
 
 pub use agent::{open_agent_pipeline, AgentCmd};
+pub use mcp::{open_mcp_subsystem, run_mcp_command, McpCmd};
 pub use rag::{open_rag_pipeline, RagCmd};
 
 use crate::config::OptionsBuilder;
@@ -138,6 +140,11 @@ pub enum Cmd {
     Agent {
         #[command(subcommand)]
         command: agent::AgentCmd,
+    },
+    /// Model Context Protocol (MCP) server, tools, resources, and prompt templates.
+    Mcp {
+        #[command(subcommand)]
+        command: mcp::McpCmd,
     },
 }
 
@@ -316,6 +323,9 @@ pub fn run(cmd: Cmd, opts: &GlobalOpts) -> Result<()> {
         }
         Cmd::Agent { command } => {
             agent::run_agent_command(command, opts)?;
+        }
+        Cmd::Mcp { command } => {
+            mcp::run_mcp_command(command, opts)?;
         }
     }
     Ok(())

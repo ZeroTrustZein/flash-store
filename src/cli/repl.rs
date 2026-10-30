@@ -7,6 +7,10 @@ use crate::cli::formatter::safe_truncate_str;
 use crate::cli::GlobalOpts;
 use crate::engine::FlashStore;
 use crate::error::{FlashStoreError, Result};
+use crate::mcp::{
+    JsonRpcRequest, McpContent, McpServerConfigBuilder, McpSubsystem, DEFAULT_SERVER_NAME,
+    DEFAULT_SERVER_VERSION, MCP_PROTOCOL_VERSION,
+};
 use crate::rag::{
     MockEmbeddingProvider, QueryEvaluationSample, RagConfig, RagEngine, RagPipeline,
     RetrievalEvaluator,
@@ -180,6 +184,13 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
             combined.extend_from_slice(args);
             execute_agent_repl(db, &combined, start_time)
         }
+        "MCP" => execute_mcp_repl(db, args, start_time),
+        s if s.starts_with("MCP-") || s.starts_with("MCP_") => {
+            let sub = &s[4..];
+            let mut combined = vec![sub.to_string()];
+            combined.extend_from_slice(args);
+            execute_mcp_repl(db, &combined, start_time)
+        }
         "HELP" | "?" => {
             let help = r#"Available REPL commands:
   PUT <key> <value>            Insert or update key-value pair
@@ -207,6 +218,14 @@ pub fn execute_repl_command(db: &FlashStore, tokens: &[String]) -> Result<Option
   AGENT MEMORY <query|RECORD>  Query or record episodic memory
   AGENT STATS                  Display agent swarm metrics and latency
   AGENT CHECKPOINT             Save workflow state to FlashStore
+  MCP TOOLS                    List registered MCP tools
+  MCP CALL <tool> [args]       Invoke MCP tool with arguments
+  MCP RESOURCES                List available MCP resources
+  MCP READ <uri>               Inspect MCP resource by URI
+  MCP PROMPTS                  List MCP prompt templates
+  MCP GET-PROMPT <name> [args] Render MCP prompt template
+  MCP INFO / STATUS / PING     Inspect MCP server status
+  MCP REQ <raw_json_rpc>       Execute raw JSON-RPC 2.0 request
   CLEAR                        Clear terminal screen
   HELP / ?                     Display this help text
   EXIT / QUIT / Q              Exit interactive shell"#;
@@ -763,6 +782,215 @@ pub fn execute_agent_repl(
     }
 }
 
+/// Execute MCP subsystem commands within the REPL.
+pub fn execute_mcp_repl(
+    db: &FlashStore,
+    args: &[String],
+    start_time: Instant,
+) -> Result<Option<String>> {
+    if args.is_empty() {
+        return Err(FlashStoreError::InvalidArgument(
+            "Usage: MCP <TOOLS|CALL|RESOURCES|READ|PROMPTS|GET-PROMPT|INFO|REQ> ...".into(),
+        ));
+    }
+
+    let subcmd = args[0].to_uppercase();
+    let sub_args = &args[1..];
+
+    let arc_db = Arc::new(db.clone());
+    let rag_engine = {
+        let config = RagConfig::default();
+        RagEngine::recover(config, arc_db.clone())
+            .ok()
+            .map(|e| Arc::new(parking_lot::RwLock::new(e)))
+    };
+    let agent_engine = {
+        let mut engine =
+            crate::agent::AgentEngine::new("repl_agent_session").with_store(arc_db.clone());
+        crate::cli::mcp::seed_standard_agents_in_engine(&mut engine);
+        Some(Arc::new(parking_lot::RwLock::new(engine)))
+    };
+
+    let config = McpServerConfigBuilder::new()
+        .server_name(DEFAULT_SERVER_NAME)
+        .build();
+
+    let subsystem = McpSubsystem::build(config, arc_db, rag_engine, agent_engine);
+
+    match subcmd.as_str() {
+        "TOOLS" | "LIST-TOOLS" => {
+            let tools = subsystem.server().tools().list();
+            let mut out = format!("=== MCP Tools ({}) ===\n", tools.len());
+            for (i, t) in tools.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}. {}\n   {}\n",
+                    i + 1,
+                    t.name,
+                    t.description.as_deref().unwrap_or("-")
+                ));
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "CALL" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: MCP CALL <tool_name> [json_args]".into(),
+                ));
+            }
+            let tool_name = &sub_args[0];
+            let json_str = if sub_args.len() > 1 {
+                sub_args[1..].join(" ")
+            } else {
+                "{}".to_string()
+            };
+            let parsed_args: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
+                FlashStoreError::InvalidArgument(format!("Invalid JSON arguments: {}", e))
+            })?;
+            let res = subsystem
+                .server()
+                .tools()
+                .call(tool_name, Some(parsed_args))?;
+            let status = if res.is_error.unwrap_or(false) {
+                "ERROR"
+            } else {
+                "SUCCESS"
+            };
+            let mut out = format!("=== MCP Tool Result [{}] ===\n", status);
+            for c in &res.content {
+                match c {
+                    McpContent::Text { text } => out.push_str(&format!("{}\n", text)),
+                    McpContent::Image { mime_type, .. } => {
+                        out.push_str(&format!("[Image: {}]\n", mime_type));
+                    }
+                    McpContent::Resource { resource } => {
+                        out.push_str(&format!("[Resource: {}]\n", resource));
+                    }
+                }
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "RESOURCES" | "LIST-RESOURCES" => {
+            let resources = subsystem.server().resources().list();
+            let mut out = format!("=== MCP Resources ({}) ===\n", resources.len());
+            for (i, r) in resources.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}. [{}] {}\n   URI: {}\n",
+                    i + 1,
+                    r.name,
+                    r.mime_type.as_deref().unwrap_or("-"),
+                    r.uri
+                ));
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "READ" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: MCP READ <uri>".into(),
+                ));
+            }
+            let uri = &sub_args[0];
+            let contents = subsystem.server().resources().read(uri)?;
+            let mut out = format!("=== MCP Resource [{}] ===\n", uri);
+            for c in contents {
+                if let Some(txt) = c.text {
+                    out.push_str(&format!("{}\n", txt));
+                } else if let Some(b) = c.blob {
+                    out.push_str(&format!("[Blob: {} bytes]\n", b.len()));
+                }
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "PROMPTS" | "LIST-PROMPTS" => {
+            let prompts = subsystem.server().prompts().list();
+            let mut out = format!("=== MCP Prompt Templates ({}) ===\n", prompts.len());
+            for (i, p) in prompts.iter().enumerate() {
+                out.push_str(&format!("{}. {}\n", i + 1, p.name));
+                if let Some(desc) = &p.description {
+                    out.push_str(&format!("   {}\n", desc));
+                }
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "GET-PROMPT" | "GETPROMPT" | "PROMPT" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: MCP GET-PROMPT <prompt_name> [json_args]".into(),
+                ));
+            }
+            let prompt_name = &sub_args[0];
+            let json_str = if sub_args.len() > 1 {
+                sub_args[1..].join(" ")
+            } else {
+                "{}".to_string()
+            };
+            let parsed_args: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
+                FlashStoreError::InvalidArgument(format!("Invalid JSON arguments: {}", e))
+            })?;
+            let map = crate::cli::mcp::value_to_string_map(parsed_args);
+            let res = subsystem
+                .server()
+                .prompts()
+                .render(prompt_name, map.as_ref())?;
+            let mut out = format!("=== MCP Prompt [{}] ===\n", prompt_name);
+            for m in res.messages {
+                match m.content {
+                    McpContent::Text { text } => {
+                        out.push_str(&format!("[{}]\n{}\n\n", m.role, text));
+                    }
+                    _ => out.push_str(&format!("[{}] (non-text content)\n\n", m.role)),
+                }
+            }
+            out.push_str(&format!("({:?})", start_time.elapsed()));
+            Ok(Some(out))
+        }
+        "INFO" | "STATUS" | "PING" => {
+            let tools_count = subsystem.server().tools().list().len();
+            let resources_count = subsystem.server().resources().list().len();
+            let prompts_count = subsystem.server().prompts().list().len();
+
+            let out = format!(
+                "=== FlashStore MCP Server ===\nServer:    {} (v{})\nProtocol:  {}\nTools:     {}\nResources: {}\nPrompts:   {}\n({:?})",
+                DEFAULT_SERVER_NAME,
+                DEFAULT_SERVER_VERSION,
+                MCP_PROTOCOL_VERSION,
+                tools_count,
+                resources_count,
+                prompts_count,
+                start_time.elapsed()
+            );
+            Ok(Some(out))
+        }
+        "REQ" | "REQUEST" | "RPC" => {
+            if sub_args.is_empty() {
+                return Err(FlashStoreError::InvalidArgument(
+                    "Usage: MCP REQ <raw_json_rpc>".into(),
+                ));
+            }
+            let raw_json = sub_args.join(" ");
+            let req: JsonRpcRequest = serde_json::from_str(&raw_json).map_err(|e| {
+                FlashStoreError::InvalidArgument(format!("Failed parsing JSON-RPC request: {}", e))
+            })?;
+            let resp = subsystem.server().handle_request(req);
+            let out = format!(
+                "{}\n({:?})",
+                serde_json::to_string_pretty(&resp).unwrap_or_default(),
+                start_time.elapsed()
+            );
+            Ok(Some(out))
+        }
+        _ => Err(FlashStoreError::InvalidArgument(format!(
+            "Unknown MCP command: '{}'. Valid commands: TOOLS, CALL, RESOURCES, READ, PROMPTS, GET-PROMPT, INFO, REQ",
+            subcmd
+        ))),
+    }
+}
+
 /// Run interactive REPL loop using stdin and stdout.
 pub fn run_repl(db: FlashStore, opts: &GlobalOpts) -> Result<()> {
     let stdin = io::stdin();
@@ -977,6 +1205,55 @@ mod tests {
 
         let agent_cp = execute_repl_command(&db, &["AGENT".into(), "CHECKPOINT".into()])?;
         assert!(agent_cp.unwrap().contains("OK"));
+
+        // MCP commands
+        let mcp_tools = execute_repl_command(&db, &["MCP".into(), "TOOLS".into()])?;
+        assert!(mcp_tools.unwrap().contains("MCP Tools"));
+
+        let mcp_call = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "CALL".into(),
+                "flash_put".into(),
+                "{\"key\": \"mcp_repl_key\", \"value\": \"mcp_repl_val\"}".into(),
+            ],
+        )?;
+        assert!(mcp_call.unwrap().contains("SUCCESS"));
+
+        let mcp_resources = execute_repl_command(&db, &["MCP".into(), "RESOURCES".into()])?;
+        assert!(mcp_resources.unwrap().contains("MCP Resources"));
+
+        let mcp_read =
+            execute_repl_command(&db, &["MCP".into(), "READ".into(), "flash://stats".into()])?;
+        assert!(mcp_read.unwrap().contains("stats"));
+
+        let mcp_prompts = execute_repl_command(&db, &["MCP".into(), "PROMPTS".into()])?;
+        assert!(mcp_prompts.unwrap().contains("flash_troubleshoot"));
+
+        let mcp_get_prompt = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "GET-PROMPT".into(),
+                "flash_troubleshoot".into(),
+                "{\"issue\": \"bad crc\"}".into(),
+            ],
+        )?;
+        assert!(mcp_get_prompt.unwrap().contains("bad crc"));
+
+        let mcp_info = execute_repl_command(&db, &["MCP".into(), "INFO".into()])?;
+        assert!(mcp_info.unwrap().contains("FlashStore MCP Server"));
+
+        let mcp_req = execute_repl_command(
+            &db,
+            &[
+                "MCP".into(),
+                "REQ".into(),
+                "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"ping\"}".into(),
+            ],
+        )?;
+        assert!(mcp_req.unwrap().contains("result"));
 
         Ok(())
     }
