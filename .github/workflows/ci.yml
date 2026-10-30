@@ -107,3 +107,8 @@ jobs:
 
       - name: Check release build
         run: cargo check --release --all-targets --all-features
+
+      - name: Verify CLI and MCP binaries execution
+        run: |
+          cargo run --bin flash-cli -- --help
+          cargo run --bin flash-mcp -- --help
