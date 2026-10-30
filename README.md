@@ -4,7 +4,7 @@
 [![CI Status](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroTrustZein/flash-store/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rustc-1.75%2B-brightgreen.svg)](https://blog.rust-lang.org/)
 
-**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust, featuring a native **RAG (Retrieval-Augmented Generation), Cross-Encoder Reranking, and Semantic Caching Subsystem**, and an **Autonomous Multi-Agent Swarm Workflow Engine**. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, fast range scans, intelligent vector-lexical retrieval, and multi-agent task execution, FlashStore provides a modular 3-tier architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, atomic `WriteBatch` persistence, hybrid BM25/vector search, cross-encoder reranking, adaptive task routing, stateful reflection loops, and episodic memory.
+**FlashStore** is an embedded, thread-safe, high-performance Log-Structured Merge-Tree (LSM-Tree) key-value storage engine engineered in 100% safe Rust, featuring a native **RAG (Retrieval-Augmented Generation), Cross-Encoder Reranking, and Semantic Caching Subsystem**, an **Autonomous Multi-Agent Swarm Workflow Engine**, and a **Model Context Protocol (MCP) Server & Tool Suite**. Designed for predictable write throughput, robust crash resilience, low-latency point lookups, fast range scans, intelligent vector-lexical retrieval, multi-agent task execution, and seamless LLM agent tool calling, FlashStore provides a modular 4-tier architecture with Write-Ahead Logging (WAL), concurrent in-memory MemTables, immutable SSTables with probabilistic Bloom filters, an LRU Block Cache, multi-level Compaction, atomic `WriteBatch` persistence, hybrid BM25/vector search, cross-encoder reranking, adaptive task routing, stateful reflection loops, episodic memory, and JSON-RPC 2.0 MCP server endpoints.
 
 ---
 
@@ -12,12 +12,13 @@
 
 - [Key Highlights](#-key-highlights)
 - [Architecture & Design](#-architecture--design)
-  - [3-Tier Layered Architecture](#3-tier-layered-architecture)
+  - [4-Tier Layered Architecture](#4-tier-layered-architecture)
   - [Storage Engine Write Path (Insert / Update / Delete / Batch)](#storage-engine-write-path-insert--update--delete--batch)
   - [Storage Engine Read Path (Point Lookup)](#storage-engine-read-path-point-lookup)
   - [SSTable File Layout](#sstable-file-layout)
   - [RAG & Reranker Subsystem Architecture](#rag--reranker-subsystem-architecture)
   - [Autonomous Multi-Agent Swarm Architecture](#autonomous-multi-agent-swarm-architecture)
+  - [Model Context Protocol (MCP) Subsystem Architecture](#model-context-protocol-mcp-subsystem-architecture)
 - [Feature Matrix](#-feature-matrix)
 - [Installation & Setup](#-installation--setup)
 - [Rust API Reference](#-rust-api-reference)
@@ -31,7 +32,8 @@
   - [Clean Shutdown & Crash Recovery](#clean-shutdown--crash-recovery)
   - [RAG Retrieval & Reranker Pipeline API](#rag-retrieval--reranker-pipeline-api)
   - [Autonomous Multi-Agent Swarm Workflow API](#autonomous-multi-agent-swarm-workflow-api)
-- [Command Line Interface (`flash-cli`)](#-command-line-interface-flash-cli)
+  - [Model Context Protocol (MCP) Server API](#model-context-protocol-mcp-server-api)
+- [Command Line Interface (`flash-cli`) & Dedicated Server (`flash-mcp`)](#-command-line-interface-flash-cli--dedicated-server-flash-mcp)
   - [CLI Overview & Global Flags](#cli-overview--global-flags)
   - [One-Shot Subcommands](#one-shot-subcommands)
   - [Interactive REPL Shell](#interactive-repl-shell)
@@ -39,6 +41,8 @@
   - [SSTable Deep Inspection](#sstable-deep-inspection)
   - [RAG & Vector Search Subcommands (`flash-cli rag`)](#rag--vector-search-subcommands-flash-cli-rag)
   - [Autonomous Multi-Agent Swarm Commands (`flash-cli agent`)](#autonomous-multi-agent-swarm-commands-flash-cli-agent)
+  - [Model Context Protocol Commands (`flash-cli mcp`)](#model-context-protocol-commands-flash-cli-mcp)
+  - [Dedicated MCP Server Binary (`flash-mcp`)](#dedicated-mcp-server-binary-flash-mcp)
 - [Engine Internals Deep Dive](#-engine-internals-deep-dive)
   - [1. Write-Ahead Log (WAL)](#1-write-ahead-log-wal)
   - [2. MemTable & SkipList](#2-memtable--skiplist)
@@ -49,6 +53,7 @@
   - [7. Concurrency & Multi-Version Ordering](#7-concurrency--multi-version-ordering)
   - [8. Hybrid RAG Retrieval, Reranking & Caching](#8-hybrid-rag-retrieval-reranking--caching)
   - [9. Autonomous Swarm Task Graphs, Adaptive Routing & Reflection](#9-autonomous-swarm-task-graphs-adaptive-routing--reflection)
+  - [10. Model Context Protocol (MCP) Server & Interoperability](#10-model-context-protocol-mcp-server--interoperability)
 - [Configuration Reference](#-configuration-reference)
 - [Code Examples](#-code-examples)
   - [Basic CRUD Lifecycle](#basic-crud-lifecycle)
@@ -58,6 +63,7 @@
   - [Multi-Threaded Worker Pool](#multi-threaded-worker-pool)
   - [End-to-End RAG Pipeline & Semantic Caching](#end-to-end-rag-pipeline--semantic-caching)
   - [Autonomous Multi-Agent Swarm Workflow](#autonomous-multi-agent-swarm-workflow)
+  - [Model Context Protocol (MCP) Server Demo](#model-context-protocol-mcp-server-demo)
 - [Deep Technical Documentation](#-deep-technical-documentation)
 - [Benchmarks & Performance](#-benchmarks--performance)
 - [Testing & Quality Assurance](#-testing--quality-assurance)

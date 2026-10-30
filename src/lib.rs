@@ -13,6 +13,7 @@
 //! - **Manifest & Versioning**: ACID version edits tracking SSTable level assignments across crash recoveries.
 //! - **RAG & Reranker Subsystem**: Native hybrid BM25/vector retrieval, cross-encoder reranking, semantic caching, and LLM context assembly.
 //! - **Multi-Agent Workflow Subsystem**: Autonomous task graph orchestration, adaptive routing, stateful reflection loops, dynamic tool calling, episodic memory, and telemetry.
+//! - **Model Context Protocol (MCP) Subsystem**: Native JSON-RPC 2.0 endpoints exposing LSM storage, RAG search, and agent swarm tools/resources/prompts to LLM host clients.
 //!
 //! ## Quick Start
 //!
@@ -98,6 +99,56 @@
 //!
 //! let summary = pipeline.run()?;
 //! assert_eq!(summary.completed_tasks, 1);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Model Context Protocol (MCP) Server Quick Start
+//!
+//! ```rust
+//! use flash_store::prelude::*;
+//! use std::sync::Arc;
+//!
+//! # fn main() -> Result<()> {
+//! # let dir = tempfile::tempdir().unwrap();
+//! let store_opts = OptionsBuilder::new().dir(dir.path()).build();
+//! let db = Arc::new(FlashStore::open(store_opts)?);
+//!
+//! let mcp_config = McpServerConfigBuilder::new()
+//!     .server_name("flash-embedded-mcp")
+//!     .enable_tools(true)
+//!     .enable_resources(true)
+//!     .enable_prompts(true)
+//!     .build();
+//!
+//! let subsystem = McpSubsystem::build(mcp_config, db, None, None);
+//!
+//! let (client, server_transport) = MockMcpTransport::create_channel_pair();
+//! let server = subsystem.server().clone();
+//! let server_transport_clone = server_transport.clone();
+//! let handle = std::thread::spawn(move || {
+//!     let _ = server.serve(&*server_transport_clone);
+//! });
+//!
+//! let init_req = JsonRpcRequest::new(
+//!     "req-1",
+//!     "initialize",
+//!     Some(serde_json::to_value(InitializeParams {
+//!         protocol_version: MCP_PROTOCOL_VERSION.to_string(),
+//!         capabilities: Default::default(),
+//!         client_info: Implementation {
+//!             name: "mcp-quickstart".to_string(),
+//!             version: "1.0.0".to_string(),
+//!         },
+//!     })?),
+//! );
+//! client.send_request(init_req)?;
+//! let init_resp = client.receive_response()?;
+//! assert!(init_resp.result.is_some());
+//!
+//! drop(client);
+//! server_transport.close();
+//! let _ = handle.join();
 //! # Ok(())
 //! # }
 //! ```
